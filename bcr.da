@@ -1,0 +1,125 @@
+import time
+
+# define the replica process
+class Replica(process):
+
+  # define the setup for the client
+  def setup(fault_tolerance_factor):
+    pass
+
+  # main execution flow of the client
+  def run():
+    while(True):
+      # print("i am here")
+      # messages from olympus get higher priority
+      --olympus_to_replica
+      --client_to_replica
+      --replica_to_replica
+
+
+  # def receive(msg=('Operation',)):
+    # output("Received wedge request from olympus.")
+
+  def receive(msg=('Wedge',), from_=olympus, at=(olympus_to_replica,) ):
+    output("Received wedge request from olympus.")
+    # write what to do for wedge on replica
+    send(('Wedge_Response',), to=olympus)
+
+  # def receive(msg=('Operation',), from_=client, at=(client_to_replica,) ):
+  def receive(msg=('Operation',), from_=client):
+    output("Received operation request from client.")
+    # write what to do for this operation
+    send(('Operation_Response',), to=client)
+    output("Sent Operation_Response to client.")
+
+  def receive(msg=('Shuttle',), from_=(replica,), at=(replica_to_replica,) ):
+    output("Received shuttle request from previous replica.")
+    # write what to do for this operation
+    send(('Shuttle',), to=replica)
+
+
+
+# define the client process
+class Client(process):
+
+  # define the setup for the client
+  def setup(olympus):
+    self.olympus = olympus
+    self.replica_sequence = ()
+
+  # main execution flow of the client
+  def run():
+    send = True # replace this with operation list
+    if not self.replica_sequence:
+      send(('GetConfig',), to=olympus)
+      output("Sent GetConfig request to olympus.")
+      # await(received(('GetConfig_Response', replica_sequence), from_=olympus))
+    while(True):
+      if self.replica_sequence and send:
+        send = False
+        output("Sent operation request to replica")
+        send(('Operation',), to=replica_sequence)
+      --accept_msgs
+
+  def receive(msg=('GetConfig_Response', replica_sequence), from_=olympus):
+    output("Received GetConfig_Response from olympus.")
+    self.replica_sequence = replica_sequence
+
+  def receive(msg=('Operation_Response',), from_=replica_sequence):
+    output("Received Operation_Response from replica.")
+
+
+# define the master process
+class Olympus(process):
+
+  # define the setup for the master
+  def setup(fault_tolerance_factor, replica):
+    self.fault_tolerance_factor = fault_tolerance_factor
+    self.replica_sequence       = ()
+    self.replica                = replica
+    startReplicas()
+
+  # main execution flow for the master
+  def run():
+    while(True):
+      --replica_to_olympus
+      --client_to_olympus
+
+  def receive(msg=('GetConfig',), from_=client):
+    output("Received GetConfig request from a client.")
+    send(('GetConfig_Response', replica_sequence), to=client)
+    output("Sent GetConfig_Response to client.")
+
+  # start the replicas
+  def startReplicas():
+    replicas_required = 2*fault_tolerance_factor + 1
+    # replica_sequence = new(Replica, at='ReplicaNode')
+    # setup(replica_sequence, (fault_tolerance_factor,) )
+    setup(replica, (fault_tolerance_factor,) )
+    start(replica)
+    output(str(replicas_required) + " new replica(s) created.")
+    # self.replica_sequence = replica_sequence
+    self.replica_sequence = replica
+
+
+
+# the main function to start the environment
+def main():
+  # create new actors
+  olympus = new(Olympus, at='OlympusNode')
+  client  = new(Client,  at='ClientNode' )
+  replica = new(Replica, at='ReplicaNode')
+
+  # parse the config file here as we want to send parameters during setup
+  # for now we set values here
+  fault_tolerance_factor = 0
+
+  # run setup for actors
+  # setup(replica, (fault_tolerance_factor,)  )
+  setup(olympus, (fault_tolerance_factor, replica)  )
+  setup(client , (olympus,)                 )
+
+  # start the actors
+  start(olympus)
+  start(client)
+  # start(replica)
