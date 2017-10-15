@@ -1,11 +1,13 @@
-import time
+# import time
+# import pdb
+import re
 
 # define the replica process
 class Replica(process):
 
   # define the setup for the client
   def setup(fault_tolerance_factor):
-    pass
+    self.objDict = {}
 
   # main execution flow of the client
   def run():
@@ -16,9 +18,53 @@ class Replica(process):
       --client_to_replica
       --replica_to_replica
 
-
   # def receive(msg=('Operation',)):
     # output("Received wedge request from olympus.")
+
+  def doWork(work):
+    # matchObj = re.match( r'\s*(put|get|slice|append)\(\'(.*)\'(,|.)\s*(\'|.)(.*)\'\)\s*', work)
+    matchObj = re.match( r'\s*(put|get|append|slice)\((.*)\)\s*', work)
+    print( "operation= " + matchObj.group(1) + " , operand(s)= " + matchObj.group(2) )
+
+    # if no valid operation or first operator is found
+    if( (not matchObj.group()) or (not matchObj.group(1)) or (not matchObj.group(2)) ):
+      return 'fail'
+
+    operand_str = matchObj.group(2).strip()
+
+    if(matchObj.group(1) == 'put'):
+      matchObj = re.match( r'\'(.*)\'\s*,\s*\'(.*)\'', operand_str)
+      objDict[matchObj.group(1)] = matchObj.group(2)
+      return 'OK'
+
+    if(matchObj.group(1) == 'get'):
+      matchObj = re.match( r'\'(.*)\'.*', operand_str)
+      if( not objDict[ matchObj.group(1) ] ):
+        return ''
+      else:
+        return objDict[matchObj.group(1)]
+
+    if(matchObj.group(1) == 'append'):
+      matchObj = re.match( r'\'(.*)\'\s*,\s*\'(.*)\'', operand_str)
+      if( not objDict[ matchObj.group(1) ] ):
+        return 'fail'
+      else:
+        objDict[ matchObj.group(1) ] += matchObj.group(2)
+        return 'OK'
+
+    if(matchObj.group(1) == 'slice'):
+      matchObj = re.match( r'\'(.*)\'\s*,\s*\'(.*)\'', operand_str)
+      if( not objDict[ matchObj.group(1) ] ):
+        return 'fail'
+      else:
+        # TODO, add valid slice length check here
+        indicesObj = re.match( r'(.*):(.*)', matchObj.group(2))
+        index1 = int( indicesObj.group(1) )
+        index2 = int( indicesObj.group(2) )
+        objDict[ matchObj.group(1) ] = objDict[ matchObj.group(1) ][ index1:index2 ]
+        return 'OK'
+
+    return ''
 
   def receive(msg=('Wedge',), from_=olympus, at=(olympus_to_replica,) ):
     output("Received wedge request from olympus.")
@@ -26,10 +72,11 @@ class Replica(process):
     send(('Wedge_Response',), to=olympus)
 
   # def receive(msg=('Operation',), from_=client, at=(client_to_replica,) ):
-  def receive(msg=('Operation',), from_=client):
+  def receive(msg=('Operation', workload), from_=client):
     output("Received operation request from client.")
     # write what to do for this operation
-    send(('Operation_Response',), to=client)
+    result = doWork(workload)
+    send(('Operation_Response', result), to=client)
     output("Sent Operation_Response to client.")
 
   def receive(msg=('Shuttle',), from_=(replica,), at=(replica_to_replica,) ):
@@ -50,23 +97,27 @@ class Client(process):
   # main execution flow of the client
   def run():
     send = True # replace this with operation list
+    workload_array = ["put('movie','star')", "get('movie')"]
     if not self.replica_sequence:
       send(('GetConfig',), to=olympus)
       output("Sent GetConfig request to olympus.")
       # await(received(('GetConfig_Response', replica_sequence), from_=olympus))
     while(True):
-      if self.replica_sequence and send:
-        send = False
-        output("Sent operation request to replica")
-        send(('Operation',), to=replica_sequence)
       --accept_msgs
+      if self.replica_sequence and send and workload_array:
+        # send = False
+        print(workload_array[0])
+        send(('Operation', workload_array[0]), to=replica_sequence)
+        output("Sent operation request to replica")
+        workload_array.pop(0)
 
   def receive(msg=('GetConfig_Response', replica_sequence), from_=olympus):
     output("Received GetConfig_Response from olympus.")
     self.replica_sequence = replica_sequence
 
-  def receive(msg=('Operation_Response',), from_=replica_sequence):
+  def receive(msg=('Operation_Response', result), from_=replica_sequence):
     output("Received Operation_Response from replica.")
+    print(result)
 
 
 # define the master process
