@@ -1,8 +1,11 @@
 import re
 
 # define the replica process
-class ClassDefinition(process):
+class Node(process):
 
+############################################
+#  Necessary functions setup and run
+############################################
   # define the setup for the client
   def setup(replica_type, pre, post, fault_tolerance_factor):
     self.myReplicaType = replica_type
@@ -19,9 +22,9 @@ class ClassDefinition(process):
       --client_to_replica
       --replica_to_replica
 
-  # def receive(msg=('Operation',)):
-    # output("Received wedge request from olympus.")
-
+############################################
+#  Helper Functions
+############################################
   def doWork(work):
     # matchObj = re.match( r'\s*(put|get|slice|append)\(\'(.*)\'(,|.)\s*(\'|.)(.*)\'\)\s*', work)
     matchObj = re.match( r'\s*(put|get|append|slice)\((.*)\)\s*', work)
@@ -83,6 +86,9 @@ class ClassDefinition(process):
     }
     return client_response_object
 
+############################################
+#  Received messages handler
+############################################
   def receive(msg=('Wedge',), from_=olympus, at=(olympus_to_replica,) ):
     output("Received wedge request from olympus.")
     # write what to do for wedge on replica

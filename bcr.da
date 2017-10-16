@@ -14,9 +14,9 @@ def main():
   replicas_required = 2*fault_tolerance_factor + 1
 
   # create new actors on specified nodes
-  olympus     = new( Olympus.ClassDefinition,                        at='OlympusNode' )
-  client      = new( Client.ClassDefinition , num=client_count,      at='ClientNode'  )
-  replica_set = new( Replica.ClassDefinition, num=replicas_required, at='ReplicaNode' )
+  olympus     = new( Olympus.Node,                        at='OlympusNode' )
+  client      = new( Client.Node , num=client_count,      at='ClientNode'  )
+  replica_set = new( Replica.Node, num=replicas_required, at='ReplicaNode' )
 
   # start olympus
   setup( olympus, (fault_tolerance_factor, replica_set) )

@@ -1,23 +1,15 @@
 import uuid
 
 # define the client process
-class ClassDefinition(process):
+class Node(process):
 
+############################################
+# Necessary functions setup and run
+############################################
   # define the setup for the client
   def setup(olympus):
     self.olympus = olympus
     self.replica_sequence = ()
-
-  # add client unique identifier
-  # add own address
-  def create_workload_object(operation):
-    print(operation)
-    workload_object = {
-      'id': uuid.uuid4().hex,
-      'requester': self,
-      'operation': operation
-    }
-    return workload_object
 
   # main execution flow of the client
   def run():
@@ -34,6 +26,25 @@ class ClassDefinition(process):
         send(('Operation', workload), to=replica_sequence)
         output("Sent operation request to replica")
 
+
+############################################
+#  Helper Functions
+############################################
+  # add client unique identifier
+  # add own address
+  def create_workload_object(operation):
+    print(operation)
+    workload_object = {
+      'id': uuid.uuid4().hex,
+      'requester': self,
+      'operation': operation
+    }
+    return workload_object
+
+
+############################################
+#  Received messages handler
+############################################
   def receive(msg=('GetConfig_Response', replica_sequence), from_=olympus):
     output("Received GetConfig_Response from olympus.")
     self.replica_sequence = replica_sequence
