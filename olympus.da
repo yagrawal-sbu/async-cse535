@@ -1,0 +1,48 @@
+# define the master process
+class ClassDefinition(process):
+
+  # define the setup for the master
+  def setup(fault_tolerance_factor, replica_set):
+    self.fault_tolerance_factor = fault_tolerance_factor
+    self.replica_sequence       = []
+    self.replica_set            = replica_set
+
+  # main execution flow for the master
+  def run():
+    startReplicas()
+    while(True):
+      --replica_to_olympus
+      --client_to_olympus
+
+  def receive(msg=('GetConfig',), from_=client):
+    output("Received GetConfig request from a client.")
+    send(('GetConfig_Response', replica_sequence[0]), to=client)
+    output("Sent GetConfig_Response to client.")
+
+  # start the replicas
+  def startReplicas():
+    replicas_required = 2*fault_tolerance_factor + 1
+
+    for replica_id in set(replica_set):
+      replica_sequence.append(replica_id)
+
+    counter = 0
+    for replica_id in replica_sequence:
+      # default conditions, used when only one node present
+      pre = None
+      post = None
+      replica_type = "HEAD"
+      if (counter==0 and len(replica_sequence)>1):
+        post = replica_sequence[counter+1]
+      if (counter==replicas_required-1 and len(replica_sequence)>1):
+        replica_type = "TAIL"
+        pre = replica_sequence[counter-1]
+      if (counter>0 and counter<replicas_required-1):
+        replica_type = "INNER"
+        pre = replica_sequence[counter-1]
+        post = replica_sequence[counter+1]
+      setup(replica_id, (replica_type, pre, post, fault_tolerance_factor) )
+      start(replica_id)
+      counter += 1
+
+    output("Replica(s) started by Olympus.")

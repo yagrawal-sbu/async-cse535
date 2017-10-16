@@ -1,231 +1,9 @@
-import time
-import uuid
-import re
+Olympus = import_da('olympus')
+Replica = import_da('replica')
+Client  = import_da('client')
 
 # other configs
-config(channel = {'fifo', 'reliable'} )
-
-# define the replica process
-class Replica(process):
-
-  # define the setup for the client
-  def setup(replica_type, pre, post, fault_tolerance_factor):
-    self.myReplicaType = replica_type
-    self.pre = pre
-    self.post = post
-    self.objDict = {}
-
-  # main execution flow of the client
-  def run():
-    while(True):
-      # print("i am here")
-      # messages from olympus get higher priority
-      --olympus_to_replica
-      --client_to_replica
-      --replica_to_replica
-
-  # def receive(msg=('Operation',)):
-    # output("Received wedge request from olympus.")
-
-  def doWork(work):
-    # matchObj = re.match( r'\s*(put|get|slice|append)\(\'(.*)\'(,|.)\s*(\'|.)(.*)\'\)\s*', work)
-    matchObj = re.match( r'\s*(put|get|append|slice)\((.*)\)\s*', work)
-    print( "operation= " + matchObj.group(1) + " , operand(s)= " + matchObj.group(2) )
-
-    # if no valid operation or first operator is found
-    if( (not matchObj.group()) or (not matchObj.group(1)) or (not matchObj.group(2)) ):
-      return 'fail'
-
-    operand_str = matchObj.group(2).strip()
-
-    if(matchObj.group(1) == 'put'):
-      matchObj = re.match( r'\'(.*)\'\s*,\s*\'(.*)\'', operand_str)
-      objDict[matchObj.group(1)] = matchObj.group(2)
-      return 'OK'
-
-    if(matchObj.group(1) == 'get'):
-      matchObj = re.match( r'\'(.*)\'.*', operand_str)
-      if( not objDict[ matchObj.group(1) ] ):
-        return ''
-      else:
-        return objDict[matchObj.group(1)]
-
-    if(matchObj.group(1) == 'append'):
-      matchObj = re.match( r'\'(.*)\'\s*,\s*\'(.*)\'', operand_str)
-      if( not objDict[ matchObj.group(1) ] ):
-        return 'fail'
-      else:
-        objDict[ matchObj.group(1) ] += matchObj.group(2)
-        return 'OK'
-
-    if(matchObj.group(1) == 'slice'):
-      matchObj = re.match( r'\'(.*)\'\s*,\s*\'(.*)\'', operand_str)
-      if( not objDict[ matchObj.group(1) ] ):
-        return 'fail'
-      else:
-        # TODO, add valid slice length check here
-        indicesObj = re.match( r'(.*):(.*)', matchObj.group(2))
-        index1 = int( indicesObj.group(1) )
-        index2 = int( indicesObj.group(2) )
-        objDict[ matchObj.group(1) ] = objDict[ matchObj.group(1) ][ index1:index2 ]
-        return 'OK'
-
-    return ''
-
-  def create_shuttle_object(workload, result):
-    shuttle_object = {
-      'client_workload': workload,
-      'result_statements': [result], # need to create a cryptohash for this
-      'slot': 1         # head should increment this
-    }
-    return shuttle_object
-
-  def create_cli_res_obj(shuttle_object, result):
-    client_response_object = {
-      'client_workload': shuttle_object['client_workload'],
-      'result': result,
-      'result_statements': shuttle_object['result_statements']
-    }
-    return client_response_object
-
-  def receive(msg=('Wedge',), from_=olympus, at=(olympus_to_replica,) ):
-    output("Received wedge request from olympus.")
-    # write what to do for wedge on replica
-    send(('Wedge_Response',), to=olympus)
-
-  def receive(msg=('Operation', workload), from_=client):
-    output("Received operation request from client.")
-    # first check with workload id if this request is in cache
-    if False:
-      pass
-    else:
-      result = doWork(workload['operation'])
-      print(result)
-      if ( (myReplicaType=="HEAD") and (post is None) ):
-        send(('Operation_Response', result), to=client)
-        output("Sent Operation_Response to client.")
-      else:
-        shuttle_object = create_shuttle_object(workload, result)
-        send(('Shuttle', shuttle_object), to=post)
-        output("Sent Shuttle to next node.")
-
-  def receive( msg=('Shuttle', shuttle_object), from_=replica_set):
-    output("Received shuttle request from previous replica.")
-    # write what to do for this operation
-    result = doWork(shuttle_object['client_workload']['operation'])
-    print(result)
-    if( myReplicaType=='TAIL' ):
-      client_response_object = create_cli_res_obj(shuttle_object, result)
-      send(('Operation_Response', client_response_object), to=client_response_object['client_workload']['requester'])
-      output("Sent Operation_Response to client.")
-      reverse_shuttle_object = 'hello'
-      send(('Reverse_Shuttle', reverse_shuttle_object), to=pre)
-      output("Sent Reverse_Shuttle to previous node.")
-    else:
-      shuttle_object['result_statements'].append(result)
-      send(('Shuttle', shuttle_object), to=post)
-      output("Sent Shuttle to next node.")
-
-  def receive( msg=('Reverse_Shuttle', reverse_shuttle_object), from_=replica_set):
-    output("Received Reverse_Shuttle from next replica in sequence.")
-    # write what to do for this operation
-    if( myReplicaType!='HEAD' and pre ):
-      send(('Reverse_Shuttle', reverse_shuttle_object), to=pre)
-      output("Sent Reverse_Shuttle to previous node.")
-
-
-# define the client process
-class Client(process):
-
-  # define the setup for the client
-  def setup(olympus):
-    self.olympus = olympus
-    self.replica_sequence = ()
-
-  # add client unique identifier
-  # add own address
-  def create_workload_object(operation):
-    print(operation)
-    workload_object = {
-      'id': uuid.uuid4().hex,
-      'requester': self,
-      'operation': operation
-    }
-    return workload_object
-
-  # main execution flow of the client
-  def run():
-    send = True # replace this with operation list
-    operations_array = ["put('movie','star')", "get('movie')"]
-    if not replica_sequence:
-      send(('GetConfig',), to=olympus)
-      output("Sent GetConfig request to olympus.")
-    while(True):
-      --accept_msgs
-      if send and replica_sequence and operations_array:
-        workload = create_workload_object(operations_array[0])
-        operations_array.pop(0)
-        send(('Operation', workload), to=replica_sequence)
-        output("Sent operation request to replica")
-
-  def receive(msg=('GetConfig_Response', replica_sequence), from_=olympus):
-    output("Received GetConfig_Response from olympus.")
-    self.replica_sequence = replica_sequence
-
-  def receive(msg=('Operation_Response', client_response_object), from_=replica_sequence):
-    output("Received Operation_Response from replica.")
-    print(client_response_object['result'])
-
-
-# define the master process
-class Olympus(process):
-
-  # define the setup for the master
-  def setup(fault_tolerance_factor, replica_set):
-    self.fault_tolerance_factor = fault_tolerance_factor
-    self.replica_sequence       = []
-    self.replica_set            = replica_set
-
-  # main execution flow for the master
-  def run():
-    startReplicas()
-    while(True):
-      --replica_to_olympus
-      --client_to_olympus
-
-  def receive(msg=('GetConfig',), from_=client):
-    output("Received GetConfig request from a client.")
-    send(('GetConfig_Response', replica_sequence[0]), to=client)
-    output("Sent GetConfig_Response to client.")
-
-  # start the replicas
-  def startReplicas():
-    replicas_required = 2*fault_tolerance_factor + 1
-
-    for replica_id in set(replica_set):
-      replica_sequence.append(replica_id)
-
-    counter = 0
-    for replica_id in replica_sequence:
-      # default conditions, used when only one node present
-      pre = None
-      post = None
-      replica_type = "HEAD"
-      if (counter==0 and len(replica_sequence)>1):
-        post = replica_sequence[counter+1]
-      if (counter==replicas_required-1 and len(replica_sequence)>1):
-        replica_type = "TAIL"
-        pre = replica_sequence[counter-1]
-      if (counter>0 and counter<replicas_required-1):
-        replica_type = "INNER"
-        pre = replica_sequence[counter-1]
-        post = replica_sequence[counter+1]
-      setup(replica_id, (replica_type, pre, post, fault_tolerance_factor) )
-      start(replica_id)
-      counter += 1
-
-    output("Replica(s) started by Olympus.")
-
+config( channel = {'fifo', 'reliable'} )
 
 # the main function to start the environment
 def main():
@@ -235,15 +13,15 @@ def main():
   fault_tolerance_factor = 1
   replicas_required = 2*fault_tolerance_factor + 1
 
-  # create new actors
-  olympus = new(Olympus, at='OlympusNode')
-  client  = new(Client,  num=client_count, at='ClientNode' )
-  replica_set = new(Replica, num=replicas_required, at='ReplicaNode')
+  # create new actors on specified nodes
+  olympus     = new( Olympus.ClassDefinition,                        at='OlympusNode' )
+  client      = new( Client.ClassDefinition , num=client_count,      at='ClientNode'  )
+  replica_set = new( Replica.ClassDefinition, num=replicas_required, at='ReplicaNode' )
 
   # start olympus
-  setup(olympus, (fault_tolerance_factor, replica_set)  )
-  start(olympus)
+  setup( olympus, (fault_tolerance_factor, replica_set) )
+  start( olympus )
 
   # start client(s)
-  setup(client , (olympus,)                 )
-  start(client)
+  setup( client , (olympus,) )
+  start( client)
