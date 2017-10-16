@@ -1,6 +1,7 @@
 # define the master process
 class Node(process):
 
+
 ############################################
 # Necessary functions setup and run
 ############################################
@@ -16,6 +17,7 @@ class Node(process):
     while(True):
       --replica_to_olympus
       --client_to_olympus
+
 
 ############################################
 #  Helper Functions
@@ -48,6 +50,7 @@ class Node(process):
       counter += 1
 
     output(str(replicas_required) + " replica(s) started by Olympus.")
+
 
 ############################################
 #  Received messages handler

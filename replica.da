@@ -3,6 +3,7 @@ import re
 # define the replica process
 class Node(process):
 
+
 ############################################
 #  Necessary functions setup and run
 ############################################
@@ -12,15 +13,16 @@ class Node(process):
     self.pre = pre
     self.post = post
     self.objDict = {}
+    self.cache = {}
 
   # main execution flow of the client
   def run():
     while(True):
-      # print("i am here")
       # messages from olympus get higher priority
       --olympus_to_replica
       --client_to_replica
       --replica_to_replica
+
 
 ############################################
 #  Helper Functions
@@ -86,50 +88,68 @@ class Node(process):
     }
     return client_response_object
 
+  def create_reverse_shuttle_object(shuttle_object):
+    return shuttle_object
+
+  def shallowAddToCacheTable(request_id, result):
+    cache[request_id] = {
+      'result': result,
+      'valid': False,
+    }
+
+  def commitCacheTableEntry(request_id):
+    cache[request_id]['valid'] = True
+
+
+
+
 ############################################
 #  Received messages handler
 ############################################
-  def receive(msg=('Wedge',), from_=olympus, at=(olympus_to_replica,) ):
-    output("Received wedge request from olympus.")
-    # write what to do for wedge on replica
-    send(('Wedge_Response',), to=olympus)
 
-  def receive(msg=('Operation', workload), from_=client):
+  # handle operation requests from client
+  def receive( msg=('Operation', workload), from_=client ):
     output("Received operation request from client.")
     # first check with workload id if this request is in cache
     if False:
       pass
     else:
       result = doWork(workload['operation'])
-      print(result)
       if ( (myReplicaType=="HEAD") and (post is None) ):
         send(('Operation_Response', result), to=client)
+        shallowAddToCacheTable( workload['id'], result )
+        commitCacheTableEntry( workload['id'] )
         output("Sent Operation_Response to client.")
       else:
         shuttle_object = create_shuttle_object(workload, result)
+        shallowAddToCacheTable( workload['id'], result )
         send(('Shuttle', shuttle_object), to=post)
         output("Sent Shuttle to next node.")
 
-  def receive( msg=('Shuttle', shuttle_object), from_=replica_set):
+  # handle shuttle messages from other replicas
+  def receive( msg=('Shuttle', shuttle_object), from_=replica_set ):
     output("Received shuttle request from previous replica.")
     # write what to do for this operation
     result = doWork(shuttle_object['client_workload']['operation'])
-    print(result)
     if( myReplicaType=='TAIL' ):
       client_response_object = create_cli_res_obj(shuttle_object, result)
       send(('Operation_Response', client_response_object), to=client_response_object['client_workload']['requester'])
       output("Sent Operation_Response to client.")
-      reverse_shuttle_object = 'hello'
+      reverse_shuttle_object = create_reverse_shuttle_object( shuttle_object )
       send(('Reverse_Shuttle', reverse_shuttle_object), to=pre)
       output("Sent Reverse_Shuttle to previous node.")
     else:
       shuttle_object['result_statements'].append(result)
+      shallowAddToCacheTable( shuttle_object['client_workload']['id'], result )
       send(('Shuttle', shuttle_object), to=post)
       output("Sent Shuttle to next node.")
 
-  def receive( msg=('Reverse_Shuttle', reverse_shuttle_object), from_=replica_set):
+  # handle reverse shuttle messages from other replicas
+  def receive( msg=('Reverse_Shuttle', reverse_shuttle_object), from_=replica_set ):
     output("Received Reverse_Shuttle from next replica in sequence.")
     # write what to do for this operation
+    commitCacheTableEntry( reverse_shuttle_object['client_workload']['id'] )
     if( myReplicaType!='HEAD' and pre ):
       send(('Reverse_Shuttle', reverse_shuttle_object), to=pre)
       output("Sent Reverse_Shuttle to previous node.")
+
