@@ -1,3 +1,6 @@
+import nacl.encoding
+import nacl.signing
+
 # define the master process
 class Node(process):
 
@@ -10,6 +13,9 @@ class Node(process):
     self.fault_tolerance_factor = fault_tolerance_factor
     self.replica_sequence       = []
     self.replica_set            = replica_set
+    self.sign_keys              = []
+    self.sign_verify_keys       = []
+
 
   # main execution flow for the master
   def run():
@@ -27,10 +33,15 @@ class Node(process):
     replicas_required = 2*fault_tolerance_factor + 1
 
     for replica_id in set(replica_set):
+      signing_key = nacl.signing.SigningKey.generate()
+      verify_key_hex = signing_key.verify_key.encode(encoder=nacl.encoding.HexEncoder)
       replica_sequence.append(replica_id)
+      sign_keys.append(signing_key)
+      sign_verify_keys.append(verify_key_hex)
+
 
     counter = 0
-    for replica_id in replica_sequence:
+    for replica_id, replica_sign_key in zip(replica_sequence, sign_keys):
       # default conditions, used when only one node present
       replica_type = "HEAD"
       pre = None
@@ -45,7 +56,7 @@ class Node(process):
           replica_type = "INNER"
           pre = replica_sequence[counter-1]
           post = replica_sequence[counter+1]
-      setup(replica_id, (replica_type, pre, post, fault_tolerance_factor) )
+      setup(replica_id, (replica_type, pre, post, fault_tolerance_factor, replica_sign_key, sign_verify_keys) )
       start(replica_id)
       counter += 1
 

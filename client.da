@@ -11,6 +11,7 @@ class Node(process):
   def setup(olympus):
     self.olympus = olympus
     self.replica_sequence = ()
+    self.timeout_array = []
 
   # main execution flow of the client
   def run():
@@ -20,11 +21,16 @@ class Node(process):
       send(('GetConfig',), to=olympus)
       output("Sent GetConfig request to olympus.")
     while(True):
+      # check if any entry in timeout_array has expired
+        #if true, send getconfig to olympus
+        #if head is still same, retransmit workload to all replicas
+        #if head has changed, send same workload to new head and reset timer
       --accept_msgs
       if send and replica_sequence and operations_array:
         workload = create_workload_object(operations_array[0])
         operations_array.pop(0)
         send(('Operation', workload), to=replica_sequence)
+        # append to timeout array with timestamp
         output("Sent operation request to replica")
 
 
@@ -53,3 +59,4 @@ class Node(process):
   def receive(msg=('Operation_Response', client_response_object), from_=replica_sequence):
     output("Received Operation_Response from replica.")
     print(client_response_object['result'])
+    print(client_response_object)

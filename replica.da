@@ -1,4 +1,6 @@
 import re
+import nacl.encoding
+import nacl.signing
 
 # define the replica process
 class Node(process):
@@ -8,12 +10,16 @@ class Node(process):
 #  Necessary functions setup and run
 ############################################
   # define the setup for the client
-  def setup(replica_type, pre, post, fault_tolerance_factor):
+  def setup(replica_type, pre, post, fault_tolerance_factor, replica_sign_key, sign_verify_keys):
     self.myReplicaType = replica_type
     self.pre = pre
     self.post = post
+    self.my_sign_key = replica_sign_key
+    self.sign_verify_keys = sign_verify_keys
     self.objDict = {}
-    self.cache = {}
+    self.result_cache = {}
+    self.response_cache = {}
+    self.slot = 0
 
   # main execution flow of the client
   def run():
@@ -27,6 +33,9 @@ class Node(process):
 ############################################
 #  Helper Functions
 ############################################
+  def getByteForm(string, encoding_format='utf-8'):
+    return bytes(string, encoding=encoding_format)
+
   def doWork(work):
     # matchObj = re.match( r'\s*(put|get|slice|append)\(\'(.*)\'(,|.)\s*(\'|.)(.*)\'\)\s*', work)
     matchObj = re.match( r'\s*(put|get|append|slice)\((.*)\)\s*', work)
@@ -72,12 +81,26 @@ class Node(process):
 
     return ''
 
+  def getSigned(string):
+    return my_sign_key.sign( getByteForm(string) )
+
+  def cryptoEncode(string):
+    return nacl.encoding.HexEncoder.encode( getByteForm(string) )
+
   def create_shuttle_object(workload, result):
+    slot += 1
     shuttle_object = {
       'client_workload': workload,
-      'result_statements': [result], # need to create a cryptohash for this
-      'slot': 1         # head should increment this
+      'order_statement': [ getSigned(result) ],
+      'result_statements': [ cryptoEncode(result) ], # need to create a cryptohash for this
+      'slot': slot         # head should increment this
     }
+    return shuttle_object
+
+  def morph_shuttle_object_forward(shuttle_object, result):
+    addToResultCache( shuttle_object['client_workload']['id'], result )
+    shuttle_object['order_statement'].append( getSigned(result) )
+    shuttle_object['result_statements'].append( cryptoEncode(result) )
     return shuttle_object
 
   def create_cli_res_obj(shuttle_object, result):
@@ -88,19 +111,24 @@ class Node(process):
     }
     return client_response_object
 
-  def create_reverse_shuttle_object(shuttle_object):
+  def create_reverse_shuttle_object( shuttle_object ):
     return shuttle_object
 
-  def shallowAddToCacheTable(request_id, result):
-    cache[request_id] = {
-      'result': result,
-      'valid': False,
-    }
+  def cacheWorkload( reverse_shuttle_object ):
+    client_workload_id = reverse_shuttle_object['client_workload']['id']
+    result = result_cache[ client_workload_id ]
+    del result_cache[ client_workload_id ]
+    client_response_object = create_cli_res_obj(reverse_shuttle_object, result)
+    response_cache[ client_workload_id ] = client_response_object
+
+  def addToResultCache(request_id, result):
+    result_cache[request_id] = result
 
   def commitCacheTableEntry(request_id):
-    cache[request_id]['valid'] = True
+    cache[request_id] = True
 
-
+  def requestInCache(workload):
+    return False
 
 
 ############################################
@@ -111,44 +139,53 @@ class Node(process):
   def receive( msg=('Operation', workload), from_=client ):
     output("Received operation request from client.")
     # first check with workload id if this request is in cache
-    if False:
+    if requestInCache(workload):
+      # send message to client directly
       pass
     else:
       result = doWork(workload['operation'])
       if ( (myReplicaType=="HEAD") and (post is None) ):
         send(('Operation_Response', result), to=client)
-        shallowAddToCacheTable( workload['id'], result )
+        addToResultCache( workload['id'], result )
         commitCacheTableEntry( workload['id'] )
+        # cacheWorkload()
         output("Sent Operation_Response to client.")
       else:
         shuttle_object = create_shuttle_object(workload, result)
-        shallowAddToCacheTable( workload['id'], result )
+        addToResultCache( workload['id'], result )
         send(('Shuttle', shuttle_object), to=post)
         output("Sent Shuttle to next node.")
 
+
   # handle shuttle messages from other replicas
   def receive( msg=('Shuttle', shuttle_object), from_=replica_set ):
-    output("Received shuttle request from previous replica.")
+    output("Received Shuttle slot="+ str(shuttle_object['slot']) +", from previous replica.")
+
     # write what to do for this operation
     result = doWork(shuttle_object['client_workload']['operation'])
     if( myReplicaType=='TAIL' ):
+      # send response to client
       client_response_object = create_cli_res_obj(shuttle_object, result)
       send(('Operation_Response', client_response_object), to=client_response_object['client_workload']['requester'])
       output("Sent Operation_Response to client.")
+
+      # start reverse shuttle
       reverse_shuttle_object = create_reverse_shuttle_object( shuttle_object )
       send(('Reverse_Shuttle', reverse_shuttle_object), to=pre)
       output("Sent Reverse_Shuttle to previous node.")
     else:
-      shuttle_object['result_statements'].append(result)
-      shallowAddToCacheTable( shuttle_object['client_workload']['id'], result )
-      send(('Shuttle', shuttle_object), to=post)
+      # inner node will forward shuttle to succeding replica
+      forward_shuttle_object = morph_shuttle_object_forward(shuttle_object, result)
+      send(('Shuttle', forward_shuttle_object), to=post)
       output("Sent Shuttle to next node.")
+
 
   # handle reverse shuttle messages from other replicas
   def receive( msg=('Reverse_Shuttle', reverse_shuttle_object), from_=replica_set ):
-    output("Received Reverse_Shuttle from next replica in sequence.")
+    output("Received Reverse_Shuttle slot="+ str(reverse_shuttle_object['slot']) +", from next replica.")
     # write what to do for this operation
-    commitCacheTableEntry( reverse_shuttle_object['client_workload']['id'] )
+    cacheWorkload( reverse_shuttle_object )
+    # commitCacheTableEntry( reverse_shuttle_object['client_workload']['id'] )
     if( myReplicaType!='HEAD' and pre ):
       send(('Reverse_Shuttle', reverse_shuttle_object), to=pre)
       output("Sent Reverse_Shuttle to previous node.")
