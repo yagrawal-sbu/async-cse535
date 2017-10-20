@@ -59,4 +59,4 @@ class Node(process):
   def receive(msg=('Operation_Response', client_response_object), from_=replica_sequence):
     output("Received Operation_Response from replica.")
     print(client_response_object['result'])
-    # print(client_response_object)
+    print(client_response_object)

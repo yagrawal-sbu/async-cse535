@@ -10,7 +10,7 @@ def main():
   # parse the config file here as we want to send parameters during setup
   # for now we set values here
   client_count = 1
-  fault_tolerance_factor = 1
+  fault_tolerance_factor = 20
   replicas_required = 2*fault_tolerance_factor + 1
   client_timeout_value = 180 # in secs
   replica_timeout_value = 120 # in secs
