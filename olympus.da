@@ -9,12 +9,13 @@ class Node(process):
 # Necessary functions setup and run
 ############################################
   # define the setup for the master
-  def setup(fault_tolerance_factor, replica_set):
+  def setup(fault_tolerance_factor, replica_set, replica_timeout_value):
     self.fault_tolerance_factor = fault_tolerance_factor
     self.replica_sequence       = []
     self.replica_set            = replica_set
     self.sign_keys              = []
     self.sign_verify_keys       = []
+    self.replica_timeout_value  = replica_timeout_value
 
 
   # main execution flow for the master
@@ -56,7 +57,7 @@ class Node(process):
           replica_type = "INNER"
           pre = replica_sequence[counter-1]
           post = replica_sequence[counter+1]
-      setup(replica_id, (replica_type, pre, post, fault_tolerance_factor, replica_sign_key, sign_verify_keys) )
+      setup(replica_id, (replica_type, pre, post, fault_tolerance_factor, replica_sign_key, sign_verify_keys, replica_timeout_value) )
       start(replica_id)
       counter += 1
 

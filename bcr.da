@@ -12,6 +12,8 @@ def main():
   client_count = 1
   fault_tolerance_factor = 1
   replicas_required = 2*fault_tolerance_factor + 1
+  client_timeout_value = 180 # in secs
+  replica_timeout_value = 120 # in secs
 
   # create new actors on specified nodes
   olympus     = new( Olympus.Node,                        at='OlympusNode' )
@@ -19,7 +21,7 @@ def main():
   replica_set = new( Replica.Node, num=replicas_required, at='ReplicaNode' )
 
   # start olympus
-  setup( olympus, (fault_tolerance_factor, replica_set) )
+  setup( olympus, (fault_tolerance_factor, replica_set, replica_timeout_value) )
   start( olympus )
 
   # start client(s)

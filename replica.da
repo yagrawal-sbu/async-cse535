@@ -1,4 +1,5 @@
 import re
+import time
 import nacl.encoding
 import nacl.signing
 
@@ -9,25 +10,40 @@ class Node(process):
 ############################################
 #  Necessary functions setup and run
 ############################################
+
   # define the setup for the client
-  def setup(replica_type, pre, post, fault_tolerance_factor, replica_sign_key, sign_verify_keys):
+  def setup(replica_type, pre, post, fault_tolerance_factor, replica_sign_key, sign_verify_keys, replica_timeout_value):
     self.myReplicaType = replica_type
     self.pre = pre
     self.post = post
     self.my_sign_key = replica_sign_key
     self.sign_verify_keys = sign_verify_keys
+    self.replica_timeout_value = replica_timeout_value
     self.objDict = {}
     self.result_cache = {}
     self.response_cache = {}
     self.slot = 0
+    self.timeout = {}
+
 
   # main execution flow of the client
   def run():
+
     while(True):
+
       # messages from olympus get higher priority
       --olympus_to_replica
       --client_to_replica
       --replica_to_replica
+
+      # check the timeout array for any timeout
+      for key, value in timeout.items():
+        now = time.time()
+        difference = int(now - value)
+        if(difference > replica_timeout_value):
+          #send reconfig to Olympus
+          pass
+
 
 
 ############################################
@@ -124,12 +140,40 @@ class Node(process):
   def addToResultCache(request_id, result):
     result_cache[request_id] = result
 
-  def commitCacheTableEntry(request_id):
-    cache[request_id] = True
+  def validateShuttleObject( shuttle_object ):
+    # true initially
+    default_status = True
+    print( shuttle_object )
 
-  def requestInCache(workload):
-    return False
+    # prove otherwise
+    # 1. look for slot holes
+    if( shuttle_object['slot'] != slot+1 ):
+      default_status = False
+    # 2. validate signatures and holes
 
+    # 3. validate crypto hashes
+    # whether all are same or not
+
+    # make neccessary changes, if valid shuttle
+    if(default_status):
+      slot += 1
+
+    return default_status
+
+  def inResultCache( workload ):
+    return workload['id'] in result_cache
+
+  def inCache( workload ):
+    return workload['id'] in response_cache
+
+  def addToTimeOut( workload ):
+    timeout[ workload['id'] ] = time.time()
+
+  def presentInTimeOut( reverse_shuttle_object ):
+    return reverse_shuttle_object['client_workload']['id'] in timeout
+
+  def deleteEntryInTimeOut( workload_id ):
+    del timeout[ workload_id ]
 
 ############################################
 #  Received messages handler
@@ -139,16 +183,26 @@ class Node(process):
   def receive( msg=('Operation', workload), from_=client ):
     output("Received operation request from client.")
     # first check with workload id if this request is in cache
-    if requestInCache(workload):
-      # send message to client directly
-      pass
+    if inCache(workload) or inResultCache(workload):
+      # received result shuttle for this object
+      # can reply to client directly
+      if( inCache(workload) ):
+        client_response_object = inCache( workload )
+        send(('Operation_Response', client_response_object), to=client_response_object['client_workload']['requester'])
+        output("Sent retransmitted Operation_Response to client.")
+        return
+      # still waiting to receive the result shuttle
+      if( inResultCache(workload) ):
+        # add request to timeout DS
+        addToTimeOut( workload )
+        return
     else:
       result = doWork(workload['operation'])
       if ( (myReplicaType=="HEAD") and (post is None) ):
         send(('Operation_Response', result), to=client)
         addToResultCache( workload['id'], result )
-        commitCacheTableEntry( workload['id'] )
-        # cacheWorkload()
+        shuttle_object = create_shuttle_object(workload, result)
+        cacheWorkload( shuttle_object )
         output("Sent Operation_Response to client.")
       else:
         shuttle_object = create_shuttle_object(workload, result)
@@ -161,8 +215,16 @@ class Node(process):
   def receive( msg=('Shuttle', shuttle_object), from_=replica_set ):
     output("Received Shuttle slot="+ str(shuttle_object['slot']) +", from previous replica.")
 
-    # write what to do for this operation
+    # validate shuttle first
+    if( not validateShuttleObject(shuttle_object) ):
+      #send reconfig request to Olympus
+      return
+
+    # perform the operation and get the result
     result = doWork(shuttle_object['client_workload']['operation'])
+    # check if result matches with the crypto hash
+
+    # take further action based on replica type
     if( myReplicaType=='TAIL' ):
       # send response to client
       client_response_object = create_cli_res_obj(shuttle_object, result)
@@ -185,7 +247,13 @@ class Node(process):
     output("Received Reverse_Shuttle slot="+ str(reverse_shuttle_object['slot']) +", from next replica.")
     # write what to do for this operation
     cacheWorkload( reverse_shuttle_object )
-    # commitCacheTableEntry( reverse_shuttle_object['client_workload']['id'] )
+    # also check if this operation is in timeout handler array
+    if( presentInTimeOut(reverse_shuttle_object) ):
+      client_response_object = inCache( reverse_shuttle_object['client_workload'] )
+      send(('Operation_Response', client_response_object), to=client_response_object['client_workload']['requester'])
+      output("Sent retransmitted Operation_Response to client.")
+      deleteEntryInTimeOut( reverse_shuttle_object['client_workload']['id'] )
+
     if( myReplicaType!='HEAD' and pre ):
       send(('Reverse_Shuttle', reverse_shuttle_object), to=pre)
       output("Sent Reverse_Shuttle to previous node.")
