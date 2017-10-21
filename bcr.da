@@ -1,3 +1,6 @@
+import sys
+import os.path
+
 Olympus = import_da('olympus')
 Replica = import_da('replica')
 Client  = import_da('client')
@@ -5,15 +8,46 @@ Client  = import_da('client')
 # other configs
 config( channel = {'fifo', 'reliable'} )
 
+# function to parse config file
+# always takes arg[1] as the config file
+# returns a dictionary of configs
+def parseConfigFile( configFilePath ):
+  config = {}
+  config_file_handle = open(configFilePath, "r")
+  lines = config_file_handle.readlines()
+  for line in lines:
+    if line[0] != '#':
+      (key,sep,val) = line.partition('=')
+      # if the line does not contain '=', it is invalid and hence ignored
+      if len(sep) != 0:
+        val = val.strip()
+        config[key.strip()] = int(val) if str.isdecimal(val) else val
+
+  # for key in config:
+    # print(key, ':', config[key])
+
+  return config
+
 # the main function to start the environment
 def main():
+  # check is argument is passed
+  if( len(sys.argv) < 2 ):
+    print("No config file was provided. Exiting.!")
+    return
+  if( not os.path.isfile(sys.argv[1]) ):
+    print("Given config file '"+ sys.argv[1]+ "' not found. Exiting.! ")
+    return
+
   # parse the config file here as we want to send parameters during setup
+  config = parseConfigFile( sys.argv[1] )
+
   # for now we set values here
-  client_count = 1
-  fault_tolerance_factor = 20
+  client_count = config['num_client']
+  fault_tolerance_factor = config['t']
   replicas_required = 2*fault_tolerance_factor + 1
-  client_timeout_value = 180 # in secs
-  replica_timeout_value = 120 # in secs
+  client_timeout = config['client_timeout']
+  head_timeout = config['head_timeout']
+  nonhead_timeout = config['nonhead_timeout']
 
   # create new actors on specified nodes
   olympus     = new( Olympus.Node,                        at='OlympusNode' )
@@ -21,7 +55,7 @@ def main():
   replica_set = new( Replica.Node, num=replicas_required, at='ReplicaNode' )
 
   # start olympus
-  setup( olympus, (fault_tolerance_factor, replica_set, replica_timeout_value) )
+  setup( olympus, (fault_tolerance_factor, replica_set, head_timeout, nonhead_timeout) )
   start( olympus )
 
   # start client(s)
