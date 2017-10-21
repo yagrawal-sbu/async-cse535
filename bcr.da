@@ -1,5 +1,7 @@
 import sys
 import os.path
+import nacl.encoding
+import nacl.signing
 
 Olympus = import_da('olympus')
 Replica = import_da('replica')
@@ -22,10 +24,6 @@ def parseConfigFile( configFilePath ):
       if len(sep) != 0:
         val = val.strip()
         config[key.strip()] = int(val) if str.isdecimal(val) else val
-
-  # for key in config:
-    # print(key, ':', config[key])
-
   return config
 
 # the main function to start the environment
@@ -42,22 +40,34 @@ def main():
   config = parseConfigFile( sys.argv[1] )
 
   # for now we set values here
-  client_count = config['num_client']
-  fault_tolerance_factor = config['t']
-  replicas_required = 2*fault_tolerance_factor + 1
-  client_timeout = config['client_timeout']
-  head_timeout = config['head_timeout']
-  nonhead_timeout = config['nonhead_timeout']
+  client_count            = config['num_client']
+  fault_tolerance_factor  = config['t']
+  replicas_required       = 2*fault_tolerance_factor + 1
+  client_timeout          = config['client_timeout']
+  head_timeout            = config['head_timeout']
+  nonhead_timeout         = config['nonhead_timeout']
 
   # create new actors on specified nodes
   olympus     = new( Olympus.Node,                        at='OlympusNode' )
-  client      = new( Client.Node , num=client_count,      at='ClientNode'  )
+  client_set  = new( Client.Node , num=client_count,      at='ClientNode'  )
   replica_set = new( Replica.Node, num=replicas_required, at='ReplicaNode' )
 
+  # create keys for client(s) and setup them
+  counter = 0
+  client_public_keys = {}
+  for client_id in set(client_set):
+    private_key = nacl.signing.SigningKey.generate()
+    public_key = private_key.verify_key.encode(encoder=nacl.encoding.HexEncoder)
+    workload = config['workload['+str(counter)+']']
+    # print(workload)
+    setup( client_id , (olympus, private_key, workload) )
+    client_public_keys[client_id] = public_key
+    counter += 1
+
   # start olympus
-  setup( olympus, (fault_tolerance_factor, replica_set, head_timeout, nonhead_timeout) )
+  setup( olympus, (fault_tolerance_factor, replica_set, head_timeout, nonhead_timeout, client_public_keys) )
   start( olympus )
 
   # start client(s)
-  setup( client , (olympus,) )
-  start( client)
+  for client in set(client_set):
+    start( client )

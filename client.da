@@ -1,3 +1,4 @@
+import re
 import uuid
 
 # define the client process
@@ -8,15 +9,14 @@ class Node(process):
 # Necessary functions setup and run
 ############################################
   # define the setup for the client
-  def setup(olympus):
+  def setup(olympus, private_key, workload_string):
     self.olympus = olympus
     self.replica_sequence = ()
     self.timeout_array = []
+    self.operations_array = partitionWorkLoad( workload_string )
 
   # main execution flow of the client
   def run():
-    send = True # replace this with operation list
-    operations_array = ["put('movie','star')", "get('movie')"]
     if not replica_sequence:
       send(('GetConfig',), to=olympus)
       output("Sent GetConfig request to olympus.")
@@ -26,7 +26,7 @@ class Node(process):
         #if head is still same, retransmit workload to all replicas
         #if head has changed, send same workload to new head and reset timer
       --accept_msgs
-      if send and replica_sequence and operations_array:
+      if replica_sequence and operations_array:
         workload = create_workload_object(operations_array[0])
         operations_array.pop(0)
         send(('Operation', workload), to=replica_sequence)
@@ -44,10 +44,23 @@ class Node(process):
     workload_object = {
       'id': uuid.uuid4().hex,
       'requester': self,
-      'operation': operation
+      'operation': operation,
+      'retransmit': False
     }
     return workload_object
 
+  def getPseudoRandomWorkLoad(seed, count):
+    print(seed)
+    print(count)
+    return []
+
+  def partitionWorkLoad(workload_string):
+    workload_array = workload_string.split(';')
+    workload_array = [x.strip(' ') for x in workload_array]
+    if('pseudorandom' in  workload_array[0]):
+      matchObj = re.match( r'\s*pseudorandom\(\s*(.*)\s*,\s*(.*)\s*\)', workload_array[0])
+      workload_array = getPseudoRandomWorkLoad( matchObj.group(1), matchObj.group(2) )
+    return workload_array
 
 ############################################
 #  Received messages handler

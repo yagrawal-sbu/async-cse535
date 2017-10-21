@@ -12,13 +12,15 @@ class Node(process):
 ############################################
 
   # define the setup for the client
-  def setup(replica_type, pre, post, fault_tolerance_factor, replica_sign_key, sign_verify_keys, replica_timeout_value):
+  def setup(replica_type, pre, post, fault_tolerance_factor, replica_sign_key, sign_verify_keys, replica_timeout_value, client_public_keys):
     self.myReplicaType = replica_type
     self.pre = pre
     self.post = post
-    self.my_sign_key = replica_sign_key
+    self.my_private_key = replica_sign_key
     self.sign_verify_keys = sign_verify_keys
     self.replica_timeout_value = replica_timeout_value
+    self.client_public_keys = client_public_keys
+
     self.objDict = {}
     self.result_cache = {}
     self.response_cache = {}
@@ -98,7 +100,7 @@ class Node(process):
     return ''
 
   def getSigned(string):
-    return my_sign_key.sign( getByteForm(string) )
+    return my_private_key.sign( getByteForm(string) )
 
   def cryptoEncode(string):
     return nacl.encoding.HexEncoder.encode( getByteForm(string) )

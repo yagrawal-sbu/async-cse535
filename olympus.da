@@ -9,7 +9,7 @@ class Node(process):
 # Necessary functions setup and run
 ############################################
   # define the setup for the master
-  def setup(fault_tolerance_factor, replica_set, head_timeout, nonhead_timeout):
+  def setup(fault_tolerance_factor, replica_set, head_timeout, nonhead_timeout, client_public_keys):
     self.fault_tolerance_factor = fault_tolerance_factor
     self.replica_sequence       = []
     self.replica_set            = replica_set
@@ -17,6 +17,7 @@ class Node(process):
     self.sign_verify_keys       = []
     self.head_timeout           = head_timeout
     self.nonhead_timeout        = nonhead_timeout
+    self.client_public_keys     = client_public_keys
 
 
   # main execution flow for the master
@@ -61,12 +62,11 @@ class Node(process):
           replica_timeout_value = nonhead_timeout
           pre = replica_sequence[counter-1]
           post = replica_sequence[counter+1]
-      setup(replica_id, (replica_type, pre, post, fault_tolerance_factor, replica_sign_key, sign_verify_keys, replica_timeout_value) )
+      setup(replica_id, (replica_type, pre, post, fault_tolerance_factor, replica_sign_key, sign_verify_keys, replica_timeout_value, client_public_keys) )
       start(replica_id)
       counter += 1
 
     output(str(replicas_required) + " replica(s) started by Olympus.")
-
 
 ############################################
 #  Received messages handler
