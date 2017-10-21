@@ -60,7 +60,7 @@ def main():
     public_key = private_key.verify_key.encode(encoder=nacl.encoding.HexEncoder)
     workload = config['workload['+str(counter)+']']
     # print(workload)
-    setup( client_id , (olympus, private_key, workload) )
+    setup( client_id , (olympus, private_key, workload, client_timeout) )
     client_public_keys[client_id] = public_key
     counter += 1
 

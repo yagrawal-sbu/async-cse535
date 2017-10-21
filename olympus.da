@@ -73,5 +73,5 @@ class Node(process):
 ############################################
   def receive(msg=('GetConfig',), from_=client):
     output("Received GetConfig request from a client.")
-    send(('GetConfig_Response', replica_sequence[0]), to=client)
+    send(('GetConfig_Response', replica_sequence), to=client)
     output("Sent GetConfig_Response to client.")

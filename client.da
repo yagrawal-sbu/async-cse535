@@ -1,19 +1,21 @@
 import re
 import uuid
+import time
 
 # define the client process
 class Node(process):
-
 
 ############################################
 # Necessary functions setup and run
 ############################################
   # define the setup for the client
-  def setup(olympus, private_key, workload_string):
+  def setup(olympus, private_key, workload_string, client_timeout):
     self.olympus = olympus
     self.replica_sequence = ()
-    self.timeout_array = []
+    self.sequence_head = False
     self.operations_array = partitionWorkLoad( workload_string )
+    self.client_timeout = client_timeout
+    self.timeout = {}
 
   # main execution flow of the client
   def run():
@@ -22,16 +24,30 @@ class Node(process):
       output("Sent GetConfig request to olympus.")
     while(True):
       # check if any entry in timeout_array has expired
-        #if true, send getconfig to olympus
-        #if head is still same, retransmit workload to all replicas
-        #if head has changed, send same workload to new head and reset timer
+      for key, value in timeout.items():
+        now = time.time()
+        difference = int(now - value['time'])
+        if(difference > client_timeout):
+          #send to all nodes
+          workload = timeout[key]['workload']
+          workload['retransmit'] = True
+          send(('Operation', workload), to=replica_sequence)
+          output("Sent operation request to replica")
+          #reset the timer
+          timeout[key]['time'] = time.time()
+          pass
+
+      # yield point to receive messages
       --accept_msgs
+
+      # send operation request to replica head
       if replica_sequence and operations_array:
         workload = create_workload_object(operations_array[0])
         operations_array.pop(0)
-        send(('Operation', workload), to=replica_sequence)
-        # append to timeout array with timestamp
+        send(('Operation', workload), to=sequence_head)
         output("Sent operation request to replica")
+        # append to timeout array with timestamp
+        addToTimeOut( workload )
 
 
 ############################################
@@ -62,14 +78,30 @@ class Node(process):
       workload_array = getPseudoRandomWorkLoad( matchObj.group(1), matchObj.group(2) )
     return workload_array
 
+  def addToTimeOut( workload ):
+    timeout[ workload['id'] ] = {
+      'time': time.time(),
+      'workload': workload
+    }
+
+  def presentInTimeOut( client_response_object ):
+    return client_response_object['client_workload']['id'] in timeout
+
+  def deleteEntryInTimeOut( workload_id ):
+    del timeout[ workload_id ]
+
 ############################################
 #  Received messages handler
 ############################################
   def receive(msg=('GetConfig_Response', replica_sequence), from_=olympus):
     output("Received GetConfig_Response from olympus.")
     self.replica_sequence = replica_sequence
+    self.sequence_head    = replica_sequence[0]
 
   def receive(msg=('Operation_Response', client_response_object), from_=replica_sequence):
     output("Received Operation_Response from replica.")
+    if( presentInTimeOut(client_response_object) ):
+      deleteEntryInTimeOut( client_response_object['client_workload']['id'] )
+      output("Removed from timeout.")
     print(client_response_object['result'])
-    print(client_response_object)
+    # print(client_response_object)
