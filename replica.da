@@ -13,7 +13,7 @@ class Node(process):
 ############################################
 
   # define the setup for the client
-  def setup(replica_type, pre, post, fault_tolerance_factor, replica_sign_key, sign_verify_keys, replica_timeout_value, client_public_keys, config_ID, myPosition):
+  def setup(replica_type, pre, post, fault_tolerance_factor, replica_sign_key, sign_verify_keys, replica_timeout_value, client_public_keys, config_ID, myPosition, replica_sequence):
     self.myReplicaType = replica_type
     self.pre = pre
     self.post = post
@@ -23,6 +23,7 @@ class Node(process):
     self.client_public_keys = client_public_keys
     self.config_ID = config_ID
     self.myPosition = myPosition
+    self.replica_sequence = replica_sequence
 
     self.objDict = {}
     self.result_cache = {}
@@ -46,7 +47,7 @@ class Node(process):
         now = time.time()
         difference = int(now - value)
         if(difference > replica_timeout_value):
-          #send reconfig to Olympus
+          send(('Reconfig_Request'), to=olympus)
           pass
 
 
@@ -254,41 +255,46 @@ class Node(process):
 ############################################
 
   # handle operation requests from client
-  def receive( msg=('Operation', workload), from_=client ):
+  def receive( msg=('Operation', encrypted_workload), from_=client ):
     output("Received operation request from client.")
-    # unsign workload
-    workload = clientUnsignWorkload(workload)
+    # decrypt workload
+    workload = clientUnsignWorkload(encrypted_workload)
     if(not workload):
       print("Signature not verified for client workload.")
       return
 
-    # first check with workload id if this request is in cache
-    # check if retransmit is true
-    if inCache(workload) or inResultCache(workload):
-      # received result shuttle for this object
-      # can reply to client directly
-      if( inCache(workload) ):
-        client_response_object = inCache( workload )
-        send(('Operation_Response', client_response_object), to=client_response_object['client_workload']['requester'])
-        output("Sent retransmitted Operation_Response to client.")
-        return
-      # still waiting to receive the result shuttle
-      if( inResultCache(workload) ):
-        # add request to timeout DS
-        addToTimeOut( workload )
-        return
+    # check if workload is a retransmission
+    if( workload['retransmit'] ):
+      # first check with workload id if this request is in cache
+      if inCache(workload) or inResultCache(workload):
+        # can reply to client directly
+        if( inCache(workload) ):
+          client_response_object = inCache( workload )
+          send(('Operation_Response', client_response_object), to=client_response_object['client_workload']['requester'])
+          output("Sent retransmitted Operation_Response to client.")
+          return
+        # still waiting to receive the result shuttle
+        if( inResultCache(workload) ):
+          # add request to timeout DS
+          addToTimeOut( workload )
+          return
     else:
-      result = doWork(workload['operation'])
-      shuttle_object = create_shuttle_object(workload)
-      addMyStatements(shuttle_object, result)
-      addToResultCache( workload['id'], result )
-      if ( (myReplicaType=="HEAD") and (post is None) ):
-        send(('Operation_Response', result), to=client)
-        cacheWorkload( shuttle_object )
-        output("Sent Operation_Response to client.")
+      if(myReplicaType=="HEAD"):
+        result = doWork(workload['operation'])
+        shuttle_object = create_shuttle_object(workload)
+        addMyStatements(shuttle_object, result)
+        addToResultCache( workload['id'], result )
+        if( post is None ):
+          client_response_object = create_cli_res_obj(shuttle_object, result)
+          send(('Operation_Response', client_response_object), to=client_response_object['client_workload']['requester'])
+          output("Sent Operation_Response to client.")
+          cacheWorkload( shuttle_object )
+        else:
+          send(('Shuttle', shuttle_object), to=post)
+          output("Sent Shuttle to next node.")
       else:
-        send(('Shuttle', shuttle_object), to=post)
-        output("Sent Shuttle to next node.")
+        output('Forwarded request from client to head replica.')
+        send(('Operation', encrypted_workload), to=replica_sequence[0])
 
 
   # handle shuttle messages from other replicas
@@ -297,7 +303,7 @@ class Node(process):
 
     # validate shuttle first
     if( not validateShuttleObject(shuttle_object) ):
-      #send reconfig request to Olympus
+      send(('Reconfig_Request'), to=olympus)
       return
 
     # perform the operation and get the result
@@ -323,14 +329,13 @@ class Node(process):
       send(('Shuttle', shuttle_object), to=post)
       output("Sent Shuttle to next node.")
 
-
   # handle reverse shuttle messages from other replicas
   def receive( msg=('Reverse_Shuttle', reverse_shuttle_object), from_=replica_set ):
     output("Received Reverse_Shuttle slot="+ str(reverse_shuttle_object['slot']) +", from next replica.")
 
     # validate shuttle first
     if( not validateShuttleObject(reverse_shuttle_object, shuttle_type='reverse') ):
-      #send reconfig request to Olympus
+      send(('Reconfig_Request'), to=olympus)
       return
 
     # cache the workload for retransmit in future

@@ -64,7 +64,7 @@ class Node(process):
           replica_timeout_value = nonhead_timeout
           pre = replica_sequence[counter-1]
           post = replica_sequence[counter+1]
-      setup(replica_id, (replica_type, pre, post, fault_tolerance_factor, replica_sign_key, sign_verify_keys, replica_timeout_value, client_public_keys, config_ID, counter) )
+      setup(replica_id, (replica_type, pre, post, fault_tolerance_factor, replica_sign_key, sign_verify_keys, replica_timeout_value, client_public_keys, config_ID, counter, replica_sequence) )
       start(replica_id)
       counter += 1
 
@@ -77,3 +77,10 @@ class Node(process):
     output("Received GetConfig request from a client.")
     send(('GetConfig_Response', replica_sequence, sign_verify_keys), to=client)
     output("Sent GetConfig_Response to client.")
+
+  def receive(msg=('Reconfig_Request',), from_=replica_set):
+    output("Received Reconfig_Request request from a replica.")
+
+  def receive(msg=('Reconfig_Request', proof), from_=client):
+    output("Received Reconfig_Request request from a client.")
+
