@@ -1,6 +1,7 @@
 import re
 import uuid
 import time
+import pickle
 
 # define the client process
 class Node(process):
@@ -16,6 +17,8 @@ class Node(process):
     self.operations_array = partitionWorkLoad( workload_string )
     self.client_timeout = client_timeout
     self.timeout = {}
+    self.sign_verify_keys = []
+    self.private_key = private_key
 
   # main execution flow of the client
   def run():
@@ -46,8 +49,7 @@ class Node(process):
         operations_array.pop(0)
         send(('Operation', workload), to=sequence_head)
         output("Sent operation request to replica")
-        # append to timeout array with timestamp
-        addToTimeOut( workload )
+        addToTimeOut( workload )        # append to timeout array with timestamp
 
 
 ############################################
@@ -57,13 +59,46 @@ class Node(process):
   # add own address
   def create_workload_object(operation):
     print(operation)
-    workload_object = {
+    workload_to_be_encrpyted = {
       'id': uuid.uuid4().hex,
-      'requester': self,
       'operation': operation,
       'retransmit': False
     }
-    return workload_object
+    final_workload = {
+      'requester': self,
+      'id': workload_to_be_encrpyted['id'],
+      'retransmit': workload_to_be_encrpyted['retransmit'],
+      'encrypted_workload': private_key.sign( pickle.dumps(workload_to_be_encrpyted) )
+    }
+    return final_workload
+
+  def validateResponse( client_response_object ):
+
+    result_hashes = client_response_object['result_proof']
+    if( len(result_hashes) != len(replica_sequence) ):
+      print("Result hashes count does not match replicas count.")
+      return False
+
+    common_result_hash = b''
+    common_operation = ''
+    for counter in range(0, len(result_hashes)):
+      # validate signature first
+      public_key = sign_verify_keys[counter]
+      try:
+        decrypted_res_hsh = public_key.verify( result_hashes[counter] )
+      except nacl.exceptions.BadSignatureError:
+        print("Signature of replica '"+str(counter)+"'' did not match.")
+        return False
+
+      # validate the result statement
+      unpickled_result_hash = pickle.loads(decrypted_res_hsh)['result_hash']
+      if(counter == 0):
+        common_result_hash = unpickled_result_hash
+      else:
+        if(unpickled_result_hash != common_result_hash):
+          print("Result hash in result statement of replica '"+str(counter)+"'' did not match.")
+          return False
+    return True
 
   def getPseudoRandomWorkLoad(seed, count):
     print(seed)
@@ -93,13 +128,20 @@ class Node(process):
 ############################################
 #  Received messages handler
 ############################################
-  def receive(msg=('GetConfig_Response', replica_sequence), from_=olympus):
+  def receive(msg=('GetConfig_Response', replica_sequence, sign_verify_keys), from_=olympus):
     output("Received GetConfig_Response from olympus.")
     self.replica_sequence = replica_sequence
     self.sequence_head    = replica_sequence[0]
+    self.sign_verify_keys = sign_verify_keys
 
   def receive(msg=('Operation_Response', client_response_object), from_=replica_sequence):
     output("Received Operation_Response from replica.")
+
+    # validate response
+    if( not validateResponse(client_response_object) ):
+      #send reconfig request to Olympus
+      return
+
     if( presentInTimeOut(client_response_object) ):
       deleteEntryInTimeOut( client_response_object['client_workload']['id'] )
       output("Removed from timeout.")

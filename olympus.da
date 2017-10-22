@@ -18,6 +18,7 @@ class Node(process):
     self.head_timeout           = head_timeout
     self.nonhead_timeout        = nonhead_timeout
     self.client_public_keys     = client_public_keys
+    self.config_ID              = 0
 
 
   # main execution flow for the master
@@ -38,9 +39,10 @@ class Node(process):
     for replica_id in set(replica_set):
       signing_key = nacl.signing.SigningKey.generate()
       verify_key_hex = signing_key.verify_key.encode(encoder=nacl.encoding.HexEncoder)
+      verify_key = nacl.signing.VerifyKey(verify_key_hex, encoder=nacl.encoding.HexEncoder)
       replica_sequence.append(replica_id)
       sign_keys.append(signing_key)
-      sign_verify_keys.append(verify_key_hex)
+      sign_verify_keys.append(verify_key)
 
 
     counter = 0
@@ -62,7 +64,7 @@ class Node(process):
           replica_timeout_value = nonhead_timeout
           pre = replica_sequence[counter-1]
           post = replica_sequence[counter+1]
-      setup(replica_id, (replica_type, pre, post, fault_tolerance_factor, replica_sign_key, sign_verify_keys, replica_timeout_value, client_public_keys) )
+      setup(replica_id, (replica_type, pre, post, fault_tolerance_factor, replica_sign_key, sign_verify_keys, replica_timeout_value, client_public_keys, config_ID, counter) )
       start(replica_id)
       counter += 1
 
@@ -73,5 +75,5 @@ class Node(process):
 ############################################
   def receive(msg=('GetConfig',), from_=client):
     output("Received GetConfig request from a client.")
-    send(('GetConfig_Response', replica_sequence), to=client)
+    send(('GetConfig_Response', replica_sequence, sign_verify_keys), to=client)
     output("Sent GetConfig_Response to client.")

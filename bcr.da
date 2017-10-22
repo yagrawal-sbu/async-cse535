@@ -57,7 +57,8 @@ def main():
   client_public_keys = {}
   for client_id in set(client_set):
     private_key = nacl.signing.SigningKey.generate()
-    public_key = private_key.verify_key.encode(encoder=nacl.encoding.HexEncoder)
+    public_key_hex = private_key.verify_key.encode(encoder=nacl.encoding.HexEncoder)
+    public_key = nacl.signing.VerifyKey(public_key_hex, encoder=nacl.encoding.HexEncoder)
     workload = config['workload['+str(counter)+']']
     # print(workload)
     setup( client_id , (olympus, private_key, workload, client_timeout) )

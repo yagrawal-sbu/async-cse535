@@ -1,5 +1,6 @@
 import re
 import time
+import pickle
 import nacl.encoding
 import nacl.signing
 
@@ -12,7 +13,7 @@ class Node(process):
 ############################################
 
   # define the setup for the client
-  def setup(replica_type, pre, post, fault_tolerance_factor, replica_sign_key, sign_verify_keys, replica_timeout_value, client_public_keys):
+  def setup(replica_type, pre, post, fault_tolerance_factor, replica_sign_key, sign_verify_keys, replica_timeout_value, client_public_keys, config_ID, myPosition):
     self.myReplicaType = replica_type
     self.pre = pre
     self.post = post
@@ -20,6 +21,8 @@ class Node(process):
     self.sign_verify_keys = sign_verify_keys
     self.replica_timeout_value = replica_timeout_value
     self.client_public_keys = client_public_keys
+    self.config_ID = config_ID
+    self.myPosition = myPosition
 
     self.objDict = {}
     self.result_cache = {}
@@ -100,37 +103,129 @@ class Node(process):
     return ''
 
   def getSigned(string):
-    return my_private_key.sign( getByteForm(string) )
+    return my_private_key.sign( string )
 
   def cryptoEncode(string):
     return nacl.encoding.HexEncoder.encode( getByteForm(string) )
 
-  def create_shuttle_object(workload, result):
-    slot += 1
+  def create_shuttle_object(workload):
+    slot += 1           # head should increment this
     shuttle_object = {
+      'slot': slot,
       'client_workload': workload,
-      'order_statement': [ getSigned(result) ],
-      'result_statements': [ cryptoEncode(result) ], # need to create a cryptohash for this
-      'slot': slot         # head should increment this
+      'order_proof': {
+        'slot': slot,
+        'operation': workload['operation'],
+        'configID': config_ID,
+        'order_statements': []
+      },
+      'result_proof': {
+        'operation': workload['operation'],
+        'result_hashes': []
+      }
     }
     return shuttle_object
 
-  def morph_shuttle_object_forward(shuttle_object, result):
-    addToResultCache( shuttle_object['client_workload']['id'], result )
-    shuttle_object['order_statement'].append( getSigned(result) )
-    shuttle_object['result_statements'].append( cryptoEncode(result) )
-    return shuttle_object
+  def addMyStatements(shuttle_object, result):
+    operation = shuttle_object['client_workload']['operation']
+    my_order_statement = {
+      'slot': slot,
+      'operation': operation
+    }
+    my_result_hash = {
+      'operation': operation,
+      'result_hash': cryptoEncode(result)
+    }
+    shuttle_object['order_proof']['order_statements'].append( getSigned( pickle.dumps(my_order_statement) ) )
+    shuttle_object['result_proof']['result_hashes'].append( getSigned( pickle.dumps(my_result_hash) ) )
+
+  def validateShuttleObject( shuttle_object, shuttle_type='forward'):
+
+    if(shuttle_type == 'forward'):
+      # 1. look for slot holes
+      if( shuttle_object['slot'] != slot+1 ):
+        print("Found hole in slot.")
+        return False
+
+    # 2. validate size of both proofs same or not
+    order_statements = shuttle_object['order_proof']['order_statements']
+    result_hashes = shuttle_object['result_proof']['result_hashes']
+    if( len(order_statements) != len(result_hashes) ):
+      print("Size of order_proof and result_proof arrays do not match.")
+      return False
+
+    # 3. validate signature and then contents
+    common_result_hash = b''
+    common_slot = 0
+    common_operation = ''
+    for counter in range(0, len(order_statements)):
+      # validate signature first
+      public_key = sign_verify_keys[counter]
+      try:
+        decrypted_order_stat = public_key.verify( order_statements[counter] )
+        decrypted_res_hsh = public_key.verify( result_hashes[counter] )
+      except nacl.exceptions.BadSignatureError:
+        print("Signature of replica '"+str(counter)+"'' did not match.")
+        return False
+
+      # validate the order statement
+      unpickled_order_stat = pickle.loads(decrypted_order_stat)
+      if(counter == 0):
+        common_slot = unpickled_order_stat['slot']
+        common_operation = unpickled_order_stat['operation']
+      else:
+        if(unpickled_order_stat['slot'] != common_slot):
+          print("Slot in order statement of replica '"+str(counter)+"'' did not match.")
+          return False
+        if(unpickled_order_stat['operation'] != common_operation):
+          print("Operation in order statement of replica '"+str(counter)+"'' did not match.")
+          return False
+
+      # validate the result statement
+      unpickled_result_hash = pickle.loads(decrypted_res_hsh)['result_hash']
+      if(counter == 0):
+        common_result_hash = unpickled_result_hash
+      else:
+        if(unpickled_result_hash != common_result_hash):
+          print("Result hash in result statement of replica '"+str(counter)+"'' did not match.")
+          return False
+
+    # if control reaches here, means valid shuttle
+    # do necessary operations
+    if(shuttle_type == 'forward'):
+      slot += 1
+
+    return True
+
+  def clientUnsignWorkload(workload):
+    if workload['requester'] in client_public_keys:
+      public_key = client_public_keys[ workload['requester'] ]
+      try:
+        decrpyted_workload = public_key.verify(workload['encrypted_workload'])
+      except nacl.exceptions.BadSignatureError:
+        print("Signature of client did not match.")
+        return False
+      unpickled_workload = pickle.loads(decrpyted_workload)
+      unpickled_workload['requester'] = workload['requester']
+      print(unpickled_workload)
+    else:
+      print("No public key found for client's request")
+      return False
+    return unpickled_workload
 
   def create_cli_res_obj(shuttle_object, result):
     client_response_object = {
       'client_workload': shuttle_object['client_workload'],
       'result': result,
-      'result_statements': shuttle_object['result_statements']
+      'result_proof': shuttle_object['result_proof']['result_hashes']
     }
     return client_response_object
 
   def create_reverse_shuttle_object( shuttle_object ):
     return shuttle_object
+
+  def addToResultCache(request_id, result):
+    result_cache[request_id] = result
 
   def cacheWorkload( reverse_shuttle_object ):
     client_workload_id = reverse_shuttle_object['client_workload']['id']
@@ -138,41 +233,6 @@ class Node(process):
     del result_cache[ client_workload_id ]
     client_response_object = create_cli_res_obj(reverse_shuttle_object, result)
     response_cache[ client_workload_id ] = client_response_object
-
-  def addToResultCache(request_id, result):
-    result_cache[request_id] = result
-
-  def validateShuttleObject( shuttle_object ):
-    # true initially
-    default_status = True
-    # print( shuttle_object )
-
-    # prove otherwise
-    # 1. look for slot holes
-    if( shuttle_object['slot'] != slot+1 ):
-      default_status = False
-
-    # 2. validate signatures and holes
-    counter = 0
-    statements = shuttle_object['order_statement']
-    for statement in statements:
-      verify_key_hex = sign_verify_keys[counter]
-      verify_key = nacl.signing.VerifyKey(verify_key_hex, encoder=nacl.encoding.HexEncoder)
-      try:
-        verify_key.verify(statement)
-      except nacl.exceptions.BadSignatureError:
-        default_status = False
-      counter += 1
-
-    # 3. validate crypto hashes, whether all are same or not
-    result_statements = shuttle_object['result_statements']
-    default_status = all(x == result_statements[0] for x in result_statements)
-
-    # make neccessary changes, if valid shuttle
-    if(default_status):
-      slot += 1
-
-    return default_status
 
   def inResultCache( workload ):
     return workload['id'] in result_cache
@@ -196,7 +256,14 @@ class Node(process):
   # handle operation requests from client
   def receive( msg=('Operation', workload), from_=client ):
     output("Received operation request from client.")
+    # unsign workload
+    workload = clientUnsignWorkload(workload)
+    if(not workload):
+      print("Signature not verified for client workload.")
+      return
+
     # first check with workload id if this request is in cache
+    # check if retransmit is true
     if inCache(workload) or inResultCache(workload):
       # received result shuttle for this object
       # can reply to client directly
@@ -212,22 +279,21 @@ class Node(process):
         return
     else:
       result = doWork(workload['operation'])
+      shuttle_object = create_shuttle_object(workload)
+      addMyStatements(shuttle_object, result)
+      addToResultCache( workload['id'], result )
       if ( (myReplicaType=="HEAD") and (post is None) ):
         send(('Operation_Response', result), to=client)
-        addToResultCache( workload['id'], result )
-        shuttle_object = create_shuttle_object(workload, result)
         cacheWorkload( shuttle_object )
         output("Sent Operation_Response to client.")
       else:
-        shuttle_object = create_shuttle_object(workload, result)
-        addToResultCache( workload['id'], result )
         send(('Shuttle', shuttle_object), to=post)
         output("Sent Shuttle to next node.")
 
 
   # handle shuttle messages from other replicas
   def receive( msg=('Shuttle', shuttle_object), from_=replica_set ):
-    output("Received Shuttle slot="+ str(shuttle_object['slot']) +", from previous replica.")
+    output("["+str(myPosition)+"] Received Shuttle slot="+ str(shuttle_object['slot']) +", from previous replica.")
 
     # validate shuttle first
     if( not validateShuttleObject(shuttle_object) ):
@@ -237,31 +303,39 @@ class Node(process):
     # perform the operation and get the result
     result = doWork(shuttle_object['client_workload']['operation'])
     # check if result matches with the crypto hash
+    addMyStatements(shuttle_object, result)
+    addToResultCache( shuttle_object['client_workload']['id'], result )
 
     # take further action based on replica type
     if( myReplicaType=='TAIL' ):
       # send response to client
-      shuttle_object = morph_shuttle_object_forward(shuttle_object, result)
       client_response_object = create_cli_res_obj(shuttle_object, result)
       send(('Operation_Response', client_response_object), to=client_response_object['client_workload']['requester'])
       output("Sent Operation_Response to client.")
 
       # start reverse shuttle
       reverse_shuttle_object = create_reverse_shuttle_object( shuttle_object )
+      cacheWorkload( reverse_shuttle_object )
       send(('Reverse_Shuttle', reverse_shuttle_object), to=pre)
       output("Sent Reverse_Shuttle to previous node.")
     else:
       # inner node will forward shuttle to succeding replica
-      forward_shuttle_object = morph_shuttle_object_forward(shuttle_object, result)
-      send(('Shuttle', forward_shuttle_object), to=post)
+      send(('Shuttle', shuttle_object), to=post)
       output("Sent Shuttle to next node.")
 
 
   # handle reverse shuttle messages from other replicas
   def receive( msg=('Reverse_Shuttle', reverse_shuttle_object), from_=replica_set ):
     output("Received Reverse_Shuttle slot="+ str(reverse_shuttle_object['slot']) +", from next replica.")
-    # write what to do for this operation
+
+    # validate shuttle first
+    if( not validateShuttleObject(reverse_shuttle_object, shuttle_type='reverse') ):
+      #send reconfig request to Olympus
+      return
+
+    # cache the workload for retransmit in future
     cacheWorkload( reverse_shuttle_object )
+
     # also check if this operation is in timeout handler array
     if( presentInTimeOut(reverse_shuttle_object) ):
       client_response_object = inCache( reverse_shuttle_object['client_workload'] )
@@ -269,6 +343,7 @@ class Node(process):
       output("Sent retransmitted Operation_Response to client.")
       deleteEntryInTimeOut( reverse_shuttle_object['client_workload']['id'] )
 
+    # forward to previous replica, if not head
     if( myReplicaType!='HEAD' and pre ):
       send(('Reverse_Shuttle', reverse_shuttle_object), to=pre)
       output("Sent Reverse_Shuttle to previous node.")
