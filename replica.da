@@ -3,6 +3,8 @@ import time
 import pickle
 import nacl.encoding
 import nacl.signing
+import pprint
+pp = pprint.PrettyPrinter(indent=4)
 
 # define the replica process
 class Node(process):
@@ -13,7 +15,8 @@ class Node(process):
 ############################################
 
   # define the setup for the client
-  def setup(replica_type, pre, post, fault_tolerance_factor, replica_sign_key, sign_verify_keys, replica_timeout_value, client_public_keys, config_ID, myPosition, replica_sequence):
+  def setup(olympus, replica_type, pre, post, fault_tolerance_factor, replica_sign_key, sign_verify_keys, replica_timeout_value, client_public_keys, config_ID, myPosition, replica_sequence, client_seq_no, failure):
+    self.olympus = olympus
     self.myReplicaType = replica_type
     self.pre = pre
     self.post = post
@@ -24,13 +27,23 @@ class Node(process):
     self.config_ID = config_ID
     self.myPosition = myPosition
     self.replica_sequence = replica_sequence
+    self.client_seq_no = client_seq_no
+    self.failure_map = parseFailures(failure)
 
+    self.changeOpFlag = False
+    self.changeResultFlag = False
+    self.dropResStmtFlag = False
     self.objDict = {}
     self.result_cache = {}
     self.response_cache = {}
     self.slot = 0
     self.timeout = {}
-
+    self.count_log = {
+      'client_request': {},
+      'forwarded_request': {},
+      'shuttle': {},
+      'result_shuttle': {}
+    }
 
   # main execution flow of the client
   def run():
@@ -51,17 +64,60 @@ class Node(process):
           pass
 
 
-
 ############################################
 #  Helper Functions
 ############################################
   def getByteForm(string, encoding_format='utf-8'):
     return bytes(string, encoding=encoding_format)
 
+  def handleWorkload(encrypted_workload):
+    # decrypt workload
+    workload = clientUnsignWorkload(encrypted_workload)
+    if(not workload):
+      replicaMsg("Dropping request.!", "Signature not verified for client workload.!")
+      return
+    replicaMsg("Client request signature verified and correct.")
+
+    # check if workload is a retransmission
+    if( workload['retransmit'] ):
+      replicaMsg("Client request is a retransmit request.")
+      # first check with workload id if this request is in cache
+      if inCache(workload) or inResultCache(workload):
+        # can reply to client directly
+        if( inCache(workload) ):
+          client_response_object = inCache( workload )
+          send(('Operation_Response', client_response_object), to=client_response_object['client_workload']['requester'])
+          output("Sent retransmitted Operation_Response to client.")
+          return
+        # still waiting to receive the result shuttle
+        if( inResultCache(workload) ):
+          # add request to timeout DS
+          addToTimeOut( workload )
+          return
+    else:
+      replicaMsg("Client request is a new request.")
+      if(myReplicaType=="HEAD"):
+        result = doWork(workload['operation'])
+        shuttle_object = create_shuttle_object(workload)
+        addMyStatements(shuttle_object, result)
+        addToResultCache( workload['id'], result )
+        if( post is None ):
+          replicaMsg("Head is the only node.!")
+          replicaMsg("Adding to cache.")
+          cacheWorkload( shuttle_object )
+          client_response_object = create_cli_res_obj(shuttle_object, result)
+          send(('Operation_Response', client_response_object), to=client_response_object['client_workload']['requester'])
+          replicaMsg("Sent Operation_Response to client.")
+        else:
+          send(('Shuttle', shuttle_object), to=post)
+          replicaMsg("Sent Shuttle to next node.")
+      else:
+        replicaMsg("Client request received on a non-head replica.", "Forwarding request to head.")
+        send(('Forwarded_Operation', encrypted_workload), to=replica_sequence[0])
+
   def doWork(work):
-    # matchObj = re.match( r'\s*(put|get|slice|append)\(\'(.*)\'(,|.)\s*(\'|.)(.*)\'\)\s*', work)
+    replicaMsg("Replica performing operation= "+ work)
     matchObj = re.match( r'\s*(put|get|append|slice)\((.*)\)\s*', work)
-    print( "operation= " + matchObj.group(1) + " , operand(s)= " + matchObj.group(2) )
 
     # if no valid operation or first operator is found
     if( (not matchObj.group()) or (not matchObj.group(1)) or (not matchObj.group(2)) ):
@@ -111,6 +167,7 @@ class Node(process):
 
   def create_shuttle_object(workload):
     slot += 1           # head should increment this
+    replicaMsg("New shuttle object created with slot="+str(slot))
     shuttle_object = {
       'slot': slot,
       'client_workload': workload,
@@ -129,6 +186,17 @@ class Node(process):
 
   def addMyStatements(shuttle_object, result):
     operation = shuttle_object['client_workload']['operation']
+
+    # inject failure of change operation
+    if(changeOpFlag):
+      operation = "get(x)"
+      changeOpFlag = False
+
+    # inject failure of change result
+    if(changeResultFlag and myReplicaType=='TAIL'):
+      result = "OK"
+      changeResultFlag = False
+
     my_order_statement = {
       'slot': slot,
       'operation': operation
@@ -139,6 +207,12 @@ class Node(process):
     }
     shuttle_object['order_proof']['order_statements'].append( getSigned( pickle.dumps(my_order_statement) ) )
     shuttle_object['result_proof']['result_hashes'].append( getSigned( pickle.dumps(my_result_hash) ) )
+
+    # inject failure of drop result statement of head
+    if(dropResStmtFlag and myReplicaType=='TAIL'):
+      shuttle_object['result_proof']['result_hashes'] = shuttle_object['result_proof']['result_hashes'][1:]
+      dropResStmtFlag = False
+    replicaMsg("Added my order and result statements.")
 
   def validateShuttleObject( shuttle_object, shuttle_type='forward'):
 
@@ -208,7 +282,7 @@ class Node(process):
         return False
       unpickled_workload = pickle.loads(decrpyted_workload)
       unpickled_workload['requester'] = workload['requester']
-      print(unpickled_workload)
+      # print(unpickled_workload)
     else:
       print("No public key found for client's request")
       return False
@@ -229,6 +303,7 @@ class Node(process):
     result_cache[request_id] = result
 
   def cacheWorkload( reverse_shuttle_object ):
+    replicaMsg("Added client_response_object to cache.")
     client_workload_id = reverse_shuttle_object['client_workload']['id']
     result = result_cache[ client_workload_id ]
     del result_cache[ client_workload_id ]
@@ -250,61 +325,110 @@ class Node(process):
   def deleteEntryInTimeOut( workload_id ):
     del timeout[ workload_id ]
 
+  def parseFailures( failures ):
+    failure_map = {
+      'client_request': {},
+      'forwarded_request': {},
+      'shuttle': {},
+      'result_shuttle': {}
+    }
+
+    if(not failures):
+      return failure_map
+
+    split_arr = failures.split(';')
+    for failure in split_arr:
+      matchObj = re.match( r'\s*(client_request|forwarded_request|shuttle|result_shuttle)\(([^,]*),([^\)]*)\),([^\()]*)\(\)\s*', failure)
+      log_type = matchObj.group(1)
+      client_ID = int( matchObj.group(2) )
+      message_count = int( matchObj.group(3) )
+      trigger_type = matchObj.group(4)
+      if( client_ID in failure_map[log_type].keys() ):
+        failure_map[log_type][client_ID][message_count] = trigger_type
+      else:
+        failure_map[log_type][client_ID] = {message_count: trigger_type}
+
+    return failure_map
+
+  def incrementCountLog(log_type, client_name):
+    client_ID = client_seq_no[client_name]
+    # replicaMsg("Increasing log count for "+ log_type + ", client=" + str(client_ID))
+    if( client_ID in count_log[log_type].keys() ):
+      count_log[log_type][client_ID] += 1
+    else:
+      count_log[log_type][client_ID] = 1
+    # check if now any failure flag needs to be set
+    setFailureFlag(log_type, client_ID, count_log[log_type][client_ID])
+
+  def setFailureFlag(log_type, client_ID, message_count):
+    try:
+      trigger_type = failure_map[log_type][client_ID][message_count]
+      replicaMsg("[Fault Injection] Condition matched for '"+log_type+"', client="+str(client_ID)+", message="+str(message_count)+".!")
+    except KeyError:
+      return
+    if(trigger_type == 'change_operation'):
+      changeOpFlag = True
+    if(trigger_type == 'change_result'):
+      changeResultFlag = True
+    if(trigger_type == 'drop_result_stmt'):
+      dropResStmtFlag = True
+
+  def replicaMsg(heading, text={}, msg_type='action'):
+    if(msg_type=='imp'):
+      output("\n==============================================================")
+    # output("["+str(self)+"]["+ str(myPosition) + "] - " + heading)
+    output("["+ str(myPosition) + "] - " + heading)
+    if(text):
+      pp.pprint(text)
+      # print(text)
+
+  def makeChangesToReverseShuttle(reverse_shuttle_object):
+    #currently only used for fault injection
+
+    if(changeResultFlag):
+      replicaMsg("[Error Injection] Change Result Flag is true.!")
+      my_result_hash = reverse_shuttle_object['result_proof']['result_hashes'][myPosition]
+      decrypted_result_hash = sign_verify_keys[myPosition].verify( my_result_hash )
+      unpickled_result_hash = pickle.loads(decrypted_result_hash)
+      unpickled_result_hash['result_hash'] = cryptoEncode("OK")
+      reverse_shuttle_object['result_proof']['result_hashes'][myPosition] = getSigned( pickle.dumps(unpickled_result_hash) )
+      changeResultFlag = False
+
+    # inject failure of drop result statement of head
+    if(dropResStmtFlag):
+      replicaMsg("[Error Injection] Drop Result Statement Flag is true.!")
+      reverse_shuttle_object['result_proof']['result_hashes'] = reverse_shuttle_object['result_proof']['result_hashes'][1:]
+      dropResStmtFlag = False
+
+    return reverse_shuttle_object
+
 ############################################
 #  Received messages handler
 ############################################
-
   # handle operation requests from client
   def receive( msg=('Operation', encrypted_workload), from_=client ):
-    output("Received operation request from client.")
-    # decrypt workload
-    workload = clientUnsignWorkload(encrypted_workload)
-    if(not workload):
-      print("Signature not verified for client workload.")
-      return
+    replicaMsg("Received operation request from client. Workload = ", encrypted_workload, msg_type='imp')
+    incrementCountLog('client_request', client)   # log message received from this client
+    handleWorkload( encrypted_workload )          # do the workload
 
-    # check if workload is a retransmission
-    if( workload['retransmit'] ):
-      # first check with workload id if this request is in cache
-      if inCache(workload) or inResultCache(workload):
-        # can reply to client directly
-        if( inCache(workload) ):
-          client_response_object = inCache( workload )
-          send(('Operation_Response', client_response_object), to=client_response_object['client_workload']['requester'])
-          output("Sent retransmitted Operation_Response to client.")
-          return
-        # still waiting to receive the result shuttle
-        if( inResultCache(workload) ):
-          # add request to timeout DS
-          addToTimeOut( workload )
-          return
-    else:
-      if(myReplicaType=="HEAD"):
-        result = doWork(workload['operation'])
-        shuttle_object = create_shuttle_object(workload)
-        addMyStatements(shuttle_object, result)
-        addToResultCache( workload['id'], result )
-        if( post is None ):
-          client_response_object = create_cli_res_obj(shuttle_object, result)
-          send(('Operation_Response', client_response_object), to=client_response_object['client_workload']['requester'])
-          output("Sent Operation_Response to client.")
-          cacheWorkload( shuttle_object )
-        else:
-          send(('Shuttle', shuttle_object), to=post)
-          output("Sent Shuttle to next node.")
-      else:
-        output('Forwarded request from client to head replica.')
-        send(('Operation', encrypted_workload), to=replica_sequence[0])
-
+  # handle operation requests from client
+  def receive( msg=('Forwarded_Operation', encrypted_workload), from_=replica_set ):
+    replicaMsg("Received Forwarded_Operation request from a replica. Workload = ", encrypted_workload, msg_type='imp')
+    incrementCountLog('forwarded_request', encrypted_workload['requester'])   # log message received from this client
+    handleWorkload( encrypted_workload )                                      # do the workload
 
   # handle shuttle messages from other replicas
   def receive( msg=('Shuttle', shuttle_object), from_=replica_set ):
-    output("["+str(myPosition)+"] Received Shuttle slot="+ str(shuttle_object['slot']) +", from previous replica.")
+    # replicaMsg("Received Shuttle slot="+str(shuttle_object['slot'])+". Shuttle_Object=", shuttle_object, msg_type='imp')
+    replicaMsg("Received Shuttle slot="+str(shuttle_object['slot'])+".", msg_type='imp')
+    incrementCountLog('shuttle', shuttle_object['client_workload']['requester'] )   # log the shuttle message received for this client
 
     # validate shuttle first
     if( not validateShuttleObject(shuttle_object) ):
+      replicaMsg("Validation failed for shuttle_object.!")
       send(('Reconfig_Request'), to=olympus)
       return
+    replicaMsg("Validation success for shuttle_object.")
 
     # perform the operation and get the result
     result = doWork(shuttle_object['client_workload']['operation'])
@@ -314,32 +438,35 @@ class Node(process):
 
     # take further action based on replica type
     if( myReplicaType=='TAIL' ):
+      replicaMsg("I am TAIL.")
       # send response to client
       client_response_object = create_cli_res_obj(shuttle_object, result)
       send(('Operation_Response', client_response_object), to=client_response_object['client_workload']['requester'])
-      output("Sent Operation_Response to client.")
+      replicaMsg("Sent Operation_Response to client.")
 
       # start reverse shuttle
       reverse_shuttle_object = create_reverse_shuttle_object( shuttle_object )
       cacheWorkload( reverse_shuttle_object )
       send(('Reverse_Shuttle', reverse_shuttle_object), to=pre)
-      output("Sent Reverse_Shuttle to previous node.")
+      replicaMsg("Sent Reverse_Shuttle to previous replica.")
     else:
       # inner node will forward shuttle to succeding replica
       send(('Shuttle', shuttle_object), to=post)
-      output("Sent Shuttle to next node.")
+      replicaMsg("Forward Shuttle to the next replica.")
 
   # handle reverse shuttle messages from other replicas
   def receive( msg=('Reverse_Shuttle', reverse_shuttle_object), from_=replica_set ):
-    output("Received Reverse_Shuttle slot="+ str(reverse_shuttle_object['slot']) +", from next replica.")
+    replicaMsg("Received Reverse_Shuttle slot="+str(reverse_shuttle_object['slot'])+".", msg_type='imp')
+    incrementCountLog('result_shuttle', reverse_shuttle_object['client_workload']['requester'] )    # log the shuttle message received for this client
 
     # validate shuttle first
     if( not validateShuttleObject(reverse_shuttle_object, shuttle_type='reverse') ):
+      replicaMsg("Validation failed for shuttle_object.!")
       send(('Reconfig_Request'), to=olympus)
       return
+    replicaMsg("Validation success for shuttle_object.")
 
-    # cache the workload for retransmit in future
-    cacheWorkload( reverse_shuttle_object )
+    cacheWorkload( reverse_shuttle_object )       # cache the workload for retransmit in future
 
     # also check if this operation is in timeout handler array
     if( presentInTimeOut(reverse_shuttle_object) ):
@@ -350,6 +477,7 @@ class Node(process):
 
     # forward to previous replica, if not head
     if( myReplicaType!='HEAD' and pre ):
+      reverse_shuttle_object = makeChangesToReverseShuttle( reverse_shuttle_object )
       send(('Reverse_Shuttle', reverse_shuttle_object), to=pre)
-      output("Sent Reverse_Shuttle to previous node.")
+      replicaMsg("Sent Reverse_Shuttle to previous node.")
 

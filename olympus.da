@@ -9,7 +9,7 @@ class Node(process):
 # Necessary functions setup and run
 ############################################
   # define the setup for the master
-  def setup(fault_tolerance_factor, replica_set, head_timeout, nonhead_timeout, client_public_keys):
+  def setup(fault_tolerance_factor, replica_set, head_timeout, nonhead_timeout, client_public_keys, client_seq_no, failures):
     self.fault_tolerance_factor = fault_tolerance_factor
     self.replica_sequence       = []
     self.replica_set            = replica_set
@@ -19,6 +19,8 @@ class Node(process):
     self.nonhead_timeout        = nonhead_timeout
     self.client_public_keys     = client_public_keys
     self.config_ID              = 0
+    self.client_seq_no          = client_seq_no
+    self.failures               = failures
 
 
   # main execution flow for the master
@@ -32,6 +34,14 @@ class Node(process):
 ############################################
 #  Helper Functions
 ############################################
+  # get the failure, given a config and replica position
+  def getFailure(config_ID, replica_ID):
+    if( not config_ID in failures.keys() ):
+      return None
+    if( not replica_ID in failures[config_ID].keys() ):
+      return None
+    return failures[config_ID][replica_ID]
+
   # start the replicas
   def startReplicas():
     replicas_required = 2*fault_tolerance_factor + 1
@@ -64,7 +74,8 @@ class Node(process):
           replica_timeout_value = nonhead_timeout
           pre = replica_sequence[counter-1]
           post = replica_sequence[counter+1]
-      setup(replica_id, (replica_type, pre, post, fault_tolerance_factor, replica_sign_key, sign_verify_keys, replica_timeout_value, client_public_keys, config_ID, counter, replica_sequence) )
+      failure = getFailure(config_ID, counter)
+      setup(replica_id, (self, replica_type, pre, post, fault_tolerance_factor, replica_sign_key, sign_verify_keys, replica_timeout_value, client_public_keys, config_ID, counter, replica_sequence, client_seq_no, failure) )
       start(replica_id)
       counter += 1
 

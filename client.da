@@ -10,7 +10,7 @@ class Node(process):
 # Necessary functions setup and run
 ############################################
   # define the setup for the client
-  def setup(olympus, private_key, workload_string, client_timeout):
+  def setup(olympus, private_key, workload_string, client_timeout, fault_tolerance_factor):
     self.olympus = olympus
     self.replica_sequence = ()
     self.sequence_head = False
@@ -19,6 +19,7 @@ class Node(process):
     self.timeout = {}
     self.sign_verify_keys = []
     self.private_key = private_key
+    self.fault_tolerance_factor = fault_tolerance_factor
 
   # main execution flow of the client
   def run():
@@ -81,6 +82,7 @@ class Node(process):
 
     common_result_hash = b''
     common_operation = ''
+    verified_count = 0
     for counter in range(0, len(result_hashes)):
       # validate signature first
       public_key = sign_verify_keys[counter]
@@ -98,6 +100,9 @@ class Node(process):
         if(unpickled_result_hash != common_result_hash):
           print("Result hash in result statement of replica '"+str(counter)+"'' did not match.")
           return False
+      verified_count += 1
+      if(verified_count > fault_tolerance_factor):
+        return True
     return True
 
   def getPseudoRandomWorkLoad(seed, count):
@@ -125,6 +130,9 @@ class Node(process):
   def deleteEntryInTimeOut( workload_id ):
     del timeout[ workload_id ]
 
+  def getMisbehaviorProof( client_response_object ):
+    return client_response_object
+
 ############################################
 #  Received messages handler
 ############################################
@@ -139,11 +147,11 @@ class Node(process):
 
     # validate response
     if( not validateResponse(client_response_object) ):
-      #send reconfig request to Olympus
+      proof = getMisbehaviorProof(client_response_object)
+      send(('Reconfig_Request', proof), to=olympus)
       return
 
     if( presentInTimeOut(client_response_object) ):
       deleteEntryInTimeOut( client_response_object['client_workload']['id'] )
       output("Removed from timeout.")
     print(client_response_object['result'])
-    # print(client_response_object)
