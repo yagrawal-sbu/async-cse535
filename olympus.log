@@ -1,9 +1,0 @@
-[2017-10-22 23:18:10,108] olympus.Node<Node:2d802#OlympusNode>:OUTPUT: 3 replica(s) started by Olympus.
-
-
-[2017-10-22 23:18:10,108] olympus.Node<Node:2d802#OlympusNode>:OUTPUT: Received GetConfig request from a client.
-[2017-10-22 23:18:10,109] olympus.Node<Node:2d802#OlympusNode>:OUTPUT: Sent GetConfig_Response to client.
-[2017-10-22 23:18:10,109] olympus.Node<Node:2d802#OlympusNode>:OUTPUT: Replica sequence sent =  [<Node:3f404#ReplicaNode>, <Node:3f402#ReplicaNode>, <Node:3f403#ReplicaNode>]
-[2017-10-22 23:18:10,109] olympus.Node<Node:2d802#OlympusNode>:OUTPUT: Public Keys sent =  [<nacl.signing.VerifyKey object at 0x7fcb8aebd470>, <nacl.signing.VerifyKey object at 0x7fcb8aebd518>, <nacl.signing.VerifyKey object at 0x7fcb8aebd5c0>] 
-
-
