@@ -60,7 +60,7 @@ ROOT/replica.da -> codes for replica
 ROOT/olympus.da -> codes for Olympus  
 ROOT/bcr.da     -> implements main function of the program  
 
-==========================================================================
+==========================================================================  
 CODE SIZE.  
 (1)  
 (1a) The following categories of the system are reported in the number of non-blank non-comment lines of codes (LOC).  
