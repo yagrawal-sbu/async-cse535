@@ -1,7 +1,7 @@
 # async-cse535
 
 ## PROJECT INFO
-Byzantine Chain Replication implementation on DistAlgo(Python).
+Byzantine Chain Replication implementation on DistAlgo(Python).  
 Team Members -  
 Yogesh Agrawal (111493656)  
 Fan Wang       (111104886)  
