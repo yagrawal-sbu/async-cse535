@@ -16,21 +16,28 @@ instructions to build and run your system.
 --> download DistAlgo and add <DAROOT>/bin to your PATH.
 --> install 'pynacl' module via pip3.
     pip install pynacl.
-the instructions should not rely on an IDE.
 
 provide a detailed sequence of commands, a shell script, or something similar.
 1. dar -H 0.0.0.0 -n OlympusNode --message-buffer-size 8000 -f -F output --logfilename olympus.log bcr.da config.txt
-2. dar -H 0.0.0.0  -n ClientNode --message-buffer-size 8000 --idle -f -F output --logfilename client.log bcr.da
+2. dar -H 0.0.0.0 -n ClientNode --message-buffer-size 8000 --idle -f -F output --logfilename client.log bcr.da
 3. dar -H 0.0.0.0 -n ReplicaNode --message-buffer-size 8000 --idle -f -F output --logfilename replica.log bcr.da
 
 config.txt contains the test case and needs to be passed only to the olympus node ( or more generically, the node which runs 'main')
 
 include a specific example of the command(s) to run a selected test case.
 
-
 ==========================================================================
 WORKLOAD GENERATION.
-briefly describe your algorithm for pseudorandom client workload generation.
+The pseudorandom workload generation consists of two parts, namely, a HashMap and a function producing the keys.  
+- Key generation
+  key = 10 * seed * sin(i + 1)
+  where i loops through the number of desired operations starting from 0 and sin stands for the sine function.
+  A multiplication of 10 * seed helps spread the values out and creates more diversity.  
+- HashMap
+  The associated hash function simply performs a modulus operation on the key based on the targeted array:
+  index = key % size_of_array
+  Several dictionaries are pre-defined to accomodate the needs including operations, values, keys, and etc.
+  As an example, the size of the operation dictionary is 4 (get, put, append, slice).
 
 ==========================================================================
 BUGS AND LIMITATIONS.
