@@ -12,10 +12,10 @@ Platform for each host:
 
 ==========================================================================  
 INSTRUCTIONS.  
-instructions to build and run your system.
---> download DistAlgo and add <DAROOT>/bin to your PATH.
---> install 'pynacl' module via pip3.
-    pip install pynacl.
+instructions to build and run your system.  
+--> download DistAlgo and add <DAROOT>/bin to your PATH.  
+--> install 'pynacl' module via pip3.  
+    pip install pynacl.  
 
 provide a detailed sequence of commands, a shell script, or something similar.
 1. dar -H 0.0.0.0 -n OlympusNode --message-buffer-size 8000 -f -F output --logfilename olympus.log bcr.da config.txt
