@@ -66,6 +66,7 @@ CODE SIZE.
 - Algorithm: XX  
 - Other: XX  
 - Total: XX  
+
 (1b) CLOC (https://github.com/AlDanial/cloc) is used to derive the numbers above.  
 
 (2)  
