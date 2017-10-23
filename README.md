@@ -53,7 +53,11 @@ a list of contributions of each team member to the current submission.  this sho
   
 ==========================================================================  
 MAIN FILES.  
-full pathnames of the files containing the main code for clients, replicas, and Olympus.  this will help graders look at the most important code first.
+The root folder of the submission is termed as ROOT  
+ROOT/client.da  -> codes for clients  
+ROOT/replica.da -> codes for replica  
+ROOT/olympus.da -> codes for Olympus  
+ROOT/bcr.da     -> implements main function of the program  
 
 ==========================================================================
 CODE SIZE.
