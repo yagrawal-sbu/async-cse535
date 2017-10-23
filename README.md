@@ -10,7 +10,7 @@ Operating system: macOS
 Type of hosts: VMs on Google Cloud Compute Engine  
 Platform for each host:  
 
-==========================================================================
+==========================================================================  
 INSTRUCTIONS.  
 instructions to build and run your system.
 --> download DistAlgo and add <DAROOT>/bin to your PATH.
@@ -22,9 +22,9 @@ provide a detailed sequence of commands, a shell script, or something similar.
 2. dar -H 0.0.0.0 -n ClientNode --message-buffer-size 8000 --idle -f -F output --logfilename client.log bcr.da
 3. dar -H 0.0.0.0 -n ReplicaNode --message-buffer-size 8000 --idle -f -F output --logfilename replica.log bcr.da
 
-config.txt contains the test case and needs to be passed only to the olympus node ( or more generically, the node which runs 'main')
+config.txt contains the test case and needs to be passed only to the olympus node ( or more generically, the node which runs 'main')  
 
-include a specific example of the command(s) to run a selected test case.
+include a specific example of the command(s) to run a selected test case.  
 
 ==========================================================================
 WORKLOAD GENERATION.  
@@ -42,15 +42,17 @@ The pseudorandom workload generation consists of two parts, namely, a HashMap an
   Note that the seed has to be an integer equal or greater than 1 and number of operations has to be a positive number.  
   
 ==========================================================================  
-BUGS AND LIMITATIONS.
+BUGS AND LIMITATIONS.  
 a list of all known bugs in and limitations of your code.
 
 ==========================================================================
-CONTRIBUTIONS.
+CONTRIBUTIONS.  
+Yogesh Agrawal does ...  
+Fan Wang does ...  
 a list of contributions of each team member to the current submission.  this should reflect how the work was divided between the team members.  generally, a dozen lines or so is sufficient.
-
-==========================================================================
-MAIN FILES.
+  
+==========================================================================  
+MAIN FILES.  
 full pathnames of the files containing the main code for clients, replicas, and Olympus.  this will help graders look at the most important code first.
 
 ==========================================================================
