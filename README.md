@@ -29,15 +29,17 @@ include a specific example of the command(s) to run a selected test case.
 ==========================================================================
 WORKLOAD GENERATION.
 The pseudorandom workload generation consists of two parts, namely, a HashMap and a function producing the keys.  
-- Key generation
-  key = 10 * seed * sin(i + 1)
-  where i loops through the number of desired operations starting from 0 and sin stands for the sine function.
+- Key generation  
+  key = 10 * seed * sin(i + 1)  
+  where i loops through the number of desired operations starting from 0 and sin stands for the sine function.  
   A multiplication of 10 * seed helps spread the values out and creates more diversity.  
-- HashMap
-  The associated hash function simply performs a modulus operation on the key based on the targeted array:
-  index = key % size_of_array
-  Several dictionaries are pre-defined to accomodate the needs including operations, values, keys, and etc.
-  As an example, the size of the operation dictionary is 4 (get, put, append, slice).
+- HashMap  
+  The associated hash function simply performs a modulus operation on the key based on the targeted array:  
+  index = key % size_of_array  
+  Several dictionaries are pre-defined to accomodate the needs including operations, values, keys, and etc.  
+  As an example, the size of the operation dictionary is 4 (get, put, append, slice).  
+  The HashMap ensures that the combo of seed and desired number of operations always generate valid workload.  
+  Note that the seed has to be an integer equal or greater than 1 and number of operations has to be a positive number.  
 
 ==========================================================================
 BUGS AND LIMITATIONS.
