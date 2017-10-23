@@ -2,9 +2,9 @@
 
 ## PROJECT INFO
 Byzantine Chain Replication implementation on DistAlgo(Python).
-Team Members -
-Yogesh Agrawal (111493656)
-Fan Wang       (111104886)
+Team Members -  
+Yogesh Agrawal (111493656)  
+Fan Wang       (111104886)  
 
 ## PLATFORM  
 DistAlgo Version:       1.0.9  
