@@ -2,6 +2,7 @@
 Byzantine Chain Replication implementation on DistAlgo(Python).
 
 ==========================================================================
+
 PLATFORM.  
 DistAlgo version: 1.0.9  
 Python implementation: CPython  
