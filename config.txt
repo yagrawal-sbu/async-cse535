@@ -10,23 +10,13 @@ nonhead_timeout = 1000
 # skip_tail_reply = 1 # 0=false, 1=true
 
 # number of clients
-num_client = 10
+num_client = 3
 # client timeout, in milliseconds
-client_timeout = 400000
+client_timeout = 100
 # CLIENT WORKLOAD
-# workload[0] = put('movie','star'); append('movie',' wars'); get('movie')
-workload[0] = pseudorandom(333,100)
-# workload[1] = put('jedi','luke skywalker'); slice('jedi','0:4'); get('jedi')
-workload[1] = pseudorandom(433,100)
-# workload[2] = put('hello','world'); put('hello','world1'); slice('hello', '0:4'); get('hello')
-workload[2] = pseudorandom(273,100)
-workload[3] = pseudorandom(873,100)
-workload[4] = pseudorandom(4593,100)
-workload[5] = pseudorandom(95687,100)
-workload[6] = pseudorandom(5754,100)
-workload[7] = pseudorandom(456,100)
-workload[8] = pseudorandom(3424,100)
-workload[9] = pseudorandom(436,100)
+workload[0] = put('movie','star'); append('movie',' wars'); get('movie')
+workload[1] = put('jedi','luke skywalker'); slice('jedi','0:4'); get('jedi')
+workload[2] = put('hello','world'); put('hello','world1'); slice('hello', '0:4'); get('hello')
 
 
 # FAILURE SCENARIO
