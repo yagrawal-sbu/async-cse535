@@ -27,7 +27,7 @@ config.txt contains the test case and needs to be passed only to the olympus nod
 include a specific example of the command(s) to run a selected test case.
 
 ==========================================================================
-WORKLOAD GENERATION.
+WORKLOAD GENERATION.  
 The pseudorandom workload generation consists of two parts, namely, a HashMap and a function producing the keys.  
 - Key generation  
   key = 10 * seed * sin(i + 1)  
@@ -40,8 +40,8 @@ The pseudorandom workload generation consists of two parts, namely, a HashMap an
   As an example, the size of the operation dictionary is 4 (get, put, append, slice).  
   The HashMap ensures that the combo of seed and desired number of operations always generate valid workload.  
   Note that the seed has to be an integer equal or greater than 1 and number of operations has to be a positive number.  
-
-==========================================================================
+  
+==========================================================================  
 BUGS AND LIMITATIONS.
 a list of all known bugs in and limitations of your code.
 
