@@ -67,6 +67,7 @@ CODE SIZE.
 - Other: XX  
 - Total: XX  
 (1b) CLOC (https://github.com/AlDanial/cloc) is used to derive the numbers above.  
+
 (2)  
 92% of the algorithm codes are for the algorithm itself.  
 The remaining 8% are for the functionalities interleaved with the algorithm.  
