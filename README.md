@@ -1,7 +1,8 @@
 # async-cse535
 
 ## PROJECT INFO
-Byzantine Chain Replication implementation on DistAlgo(Python).  
+Byzantine Chain Replication implementation on DistAlgo(Python3). 
+
 Team Members -  
 Yogesh Agrawal (111493656)  
 Fan Wang       (111104886)  
@@ -36,32 +37,29 @@ We need to create 3 nodes, one each for olympus, replica and client.
 
 <config_file> contains the test case and needs to be passed only to the olympus node ( or more generically, the node which runs 'main').
 
-Example - 
+## Example - 
     1.dar -H 1.0.0.1 -n OlympusNode --message-buffer-size 8000 -f -F output --logfilename olympus.log bcr.da config.txt
-2. dar -H 2.0.0.2 -R 1.0.0.1 -n ClientNode --message-buffer-size 8000 --idle -f -F output --logfilename client.log bcr.da
-3. dar -H 2.0.0.2 -R 1.0.0.1 -n ReplicaNode --message-buffer-size 8000 --idle -f -F output --logfilename replica.log bcr.da
+    2. dar -H 2.0.0.2 -R 1.0.0.1 -n ClientNode --message-buffer-size 8000 --idle -f -F output --logfilename client.log bcr.da
+    3. dar -H 2.0.0.2 -R 1.0.0.1 -n ReplicaNode --message-buffer-size 8000 --idle -f -F output --logfilename replica.log bcr.da
 
 ## WORKLOAD GENERATION
-The pseudorandom workload generation consists of two parts, namely, a HashMap and a function producing the keys. 
-- Key generation  
-  key = 10 * seed * sin(i + 1)  
-  where i loops through the number of desired operations starting from 0 and sin stands for the sine function.  
-  A multiplication of 10 * seed helps spread the values out and creates more diversity.  
-- HashMap  
-  The associated hash function simply performs a modulus operation on the key based on the targeted array:  
-  index = key % size_of_array  
-  Several dictionaries are pre-defined to accomodate the needs including operations, values, keys, and etc.  
-  As an example, the size of the operation dictionary is 4 (get, put, append, slice).  
-  The HashMap ensures that the combo of seed and desired number of operations always generate valid workload.  
-  Note that the seed has to be an integer equal or greater than 1 and number of operations has to be a positive number.  
+We generate the pseudorandom workload by using random number generator in pyhton with a seed.
+1. Initialise operations array, key array and value arrays.
+2. Generates random numbers(with seed) within limits of array size of above mentioned arrays.
+3. Pick element from each array corresponding to the array.
+4. Create 1 operation from above selected values.
+5. Repeat 2-4 for generating n operations.
+
+Arrays are pre-defined to accomodate the needs including operations, values, keys, and etc.  
+Note that the seed has to be an integer and number of operations has to be a positive number.
   
 ## BUGS AND LIMITATIONS
-a list of all known bugs in and limitations of your code.
+.
 
 ## CONTRIBUTIONS
-Yogesh Agrawal does ...  
-Fan Wang does ...  
-a list of contributions of each team member to the current submission.  this should reflect how the work was divided between the team members.  generally, a dozen lines or so is sufficient.
+Yogesh Agrawal completed the parts of code in replica, olympus and main code; logging, testing and documentation.
+Fan Wang completed the parts of code in client, multi-host setup and testing.
+
 
 ## MAIN FILES
 The root folder of the submission is termed as ROOT.
@@ -71,28 +69,21 @@ ROOT/replica.da -> codes for replica
 ROOT/olympus.da -> codes for Olympus  
 
 ## CODE SIZE
-(1)  
-(1a) The following categories of the system are reported in the number of non-blank non-comment lines of codes (LOC).  
-- Algorithm: XX  
-- Other: XX  
-- Total: XX  
-
-(1b) CLOC (https://github.com/AlDanial/cloc) is used to derive the numbers above. A Windows executable cloc-1.74.exe  
-is downloaded and applied to count the loc.  
+(1) number of non-blank non-comment lines of codes (LOC)
+- Algorithm: 498
+- Other: 300
+- Total: 798
+CLOC (https://github.com/AlDanial/cloc) is used to derive the numbers above.
+Installed via 'brew install cloc'.
 
 (2)  
-92% of the algorithm codes are for the algorithm itself.  
-The remaining 8% are for the functionalities interleaved with the algorithm.  
+Approximately 270 Lines are the main algorithm.
+Remaining 228 functionalities interleaved with the algorithm.
 
-==========================================================================  
-LANGUAGE FEATURE USAGE.  
-- number of list comprehensions: XX  
-- number of dictionary comprehensions: XX  
-- number of set comprehensions: XX  
-- number of aggregations: XX  
-- number of quantifications: XX  
+# LANGUAGE FEATURE USAGE.  
+- number of list comprehensions: 0
+- number of dictionary comprehensions: 0
+- number of set comprehensions: 0
+- number of aggregations: 0
+- number of quantifications: 0
 
-
-==========================================================================  
-OTHER COMMENTS.  
-anything else you want us to know.
