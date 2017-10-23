@@ -83,13 +83,13 @@ def main():
     public_key = nacl.signing.VerifyKey(public_key_hex, encoder=nacl.encoding.HexEncoder)
     workload = config['workload['+str(counter)+']']
     # print(workload)
-    setup( client_id , (olympus, private_key, workload, client_timeout, fault_tolerance_factor) )
+    setup( client_id , (olympus, private_key, workload, client_timeout, fault_tolerance_factor, counter) )
     client_public_keys[client_id] = public_key
     client_seq_no[client_id] = counter
     counter += 1
 
   # start olympus
-  setup( olympus, (fault_tolerance_factor, replica_set, head_timeout, nonhead_timeout, client_public_keys, client_seq_no, failures) )
+  setup( olympus, (fault_tolerance_factor, replica_set, head_timeout, nonhead_timeout, client_public_keys, client_seq_no, failures, config) )
   start( olympus )
 
   # start client(s)

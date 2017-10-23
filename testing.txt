@@ -1,0 +1,24 @@
+==================================================================================================
+		TESTING SCENARIOS
+==================================================================================================
+--------------------------------------------------------------------------------------------------
+1.	DESCRIPTION	:	Failure free scenario with 3 replicas and fault tolerance(t) as 1.
+	CONFIGFILES	:	no_failure_t1_c3/config.txt
+	LOGFILES	:	no_failure_t1_c3/olympus.log
+					no_failure_t1_c3/replica.log
+					no_failure_t1_c3/client.log
+	OTHER 		:	Client timeout value is taken as 100 ms, so as to avoid premature timeout.
+	OUTCOME 	:	PASS
+	AUTOCHECK	:	NA
+
+--------------------------------------------------------------------------------------------------
+2.	DESCRIPTION	:	Failure free scenario with 3 replicas and fault tolerance(t) as 1.
+	CONFIGFILES	:	no_failure_t1_c3/config.txt
+	LOGFILES	:	no_failure_t1_c3/olympus.log
+					no_failure_t1_c3/replica.log
+					no_failure_t1_c3/client.log
+	OTHER 		:	Client timeout value is taken as 100 ms, so as to avoid premature timeout.
+	OUTCOME 	:	PASS
+	AUTOCHECK	:	NA
+
+--------------------------------------------------------------------------------------------------

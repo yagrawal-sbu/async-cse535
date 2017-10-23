@@ -2,6 +2,9 @@ import re
 import uuid
 import time
 import pickle
+import nacl.encoding
+import nacl.signing
+import random
 
 # define the client process
 class Node(process):
@@ -10,7 +13,7 @@ class Node(process):
 # Necessary functions setup and run
 ############################################
   # define the setup for the client
-  def setup(olympus, private_key, workload_string, client_timeout, fault_tolerance_factor):
+  def setup(olympus, private_key, workload_string, client_timeout, fault_tolerance_factor, myPosition):
     self.olympus = olympus
     self.replica_sequence = ()
     self.sequence_head = False
@@ -25,32 +28,42 @@ class Node(process):
   def run():
     if not replica_sequence:
       send(('GetConfig',), to=olympus)
-      output("Sent GetConfig request to olympus.")
+      clientMsg("Sent GetConfig request to olympus.\n\n")
     while(True):
       # check if any entry in timeout_array has expired
       for key, value in timeout.items():
         now = time.time()
         difference = int(now - value['time'])
-        if(difference > client_timeout):
-          #send to all nodes
-          workload = timeout[key]['workload']
-          workload['retransmit'] = True
-          send(('Operation', workload), to=replica_sequence)
-          output("Sent operation request to replica")
-          #reset the timer
-          timeout[key]['time'] = time.time()
-          pass
+        difference *= 1000
+        if(difference > client_timeout):      #send to all nodes
+          if( value['workload']['retransmit'] == 1 ):
+            clientMsg("Timeout expired for retransmitted request=", key)
+            workload = timeout[key]['workload']
+            send(('Operation', workload), to=replica_sequence)
+            clientMsg("Sent Operation request to all replicas.", workload)
+            pass
+          else:
+            clientMsg("Timeout expired for request=", key)
+            timeout[key]['workload']['retransmit'] = 1
+            workload = timeout[key]['workload']
+            send(('Operation', workload), to=replica_sequence)
+            clientMsg("Sent Operation request to all replicas.", workload)
+            timeout[key]['time'] = time.time()  #reset the timer
+          clientMsg("\n\n")
 
       # yield point to receive messages
       --accept_msgs
 
       # send operation request to replica head
       if replica_sequence and operations_array:
-        workload = create_workload_object(operations_array[0])
+        op = operations_array[0]
+        workload = create_workload_object(op)
         operations_array.pop(0)
         send(('Operation', workload), to=sequence_head)
-        output("Sent operation request to replica")
+        clientMsg("Sent Operation request to replica head.", op)
+        clientMsg(workload)
         addToTimeOut( workload )        # append to timeout array with timestamp
+        clientMsg("\n\n")
 
 
 ############################################
@@ -63,7 +76,7 @@ class Node(process):
     workload_to_be_encrpyted = {
       'id': uuid.uuid4().hex,
       'operation': operation,
-      'retransmit': False
+      'retransmit': 0
     }
     final_workload = {
       'requester': self,
@@ -73,6 +86,12 @@ class Node(process):
     }
     return final_workload
 
+  def getByteForm(string, encoding_format='utf-8'):
+    return bytes(string, encoding=encoding_format)
+
+  def cryptoEncode(string):
+    return nacl.encoding.HexEncoder.encode( getByteForm(string) )
+
   def validateResponse( client_response_object ):
 
     result_hashes = client_response_object['result_proof']
@@ -80,7 +99,7 @@ class Node(process):
       print("Result hashes count does not match replicas count.")
       return False
 
-    common_result_hash = b''
+    common_result_hash = cryptoEncode( client_response_object['result'] )
     common_operation = ''
     verified_count = 0
     for counter in range(0, len(result_hashes)):
@@ -106,19 +125,53 @@ class Node(process):
     return True
 
   def getPseudoRandomWorkLoad(seed, count):
-    print(seed)
-    print(count)
-    return []
+    if(count==0):
+      return []
+
+    seed = int( int(seed) / int(count) )
+    op_array  = ["put", "get", "slice", "append"]
+    key_array = ["movie", "course", "teacher", "jedi", "sith", "drinks", "burgers", "pasta", "car brand", "laptop brand", "banks", "cell phone brand"]
+    val_array = ["Inception", "Titanic", "Pacific Rim", "Moana", "Spider Man",
+           "Asynchronous", "Computer Vision", "Computer Graphics", "Algorithm", "Machine Learning",
+           "Roy Shilkrot", "Scott Stoller", "Leo Bachmair", "Micheal Bender", "Xiaojun Bi",
+           "Kit Fisto", "Mace Windu", "Ki-Adi-Mundi", "Qui-Gon Jinn", "Plo Koon",
+           "Darth Maul", "Darth Bane", "Darth Vader", "Revan", "Darth Nihl",
+           "Coke", "Pepsi", "Snapple", "Rum", "Soda",
+           "McDonald's", "Rice Burger", "Salmon Burger", "Cheese Burger", "Buffalo Burger",
+           "Penne", "Orecchiette", "Linguine", "Bucatini", "Orzo",
+           "Acura", "Audi", "BMW", "Buick", "Honda",
+           "ASUS", "MAC", "Lenovo", "HP", "Dell",
+           "Chase", "Citibank", "CapitalOne", "Discover", "BOA",
+           "Nokia", "SONY", "Iphone", "HTC", "Samsung"
+    ]
+    final_workload = []
+    random.seed(seed)
+    for i in range(0, count):
+      op_val = random.randint(0, len(op_array)-1)
+      key_val = random.randint(0, len(key_array)-1)
+      val_val = random.randint(0, len(val_array)-1)
+      op_string = ''
+      if (op_array[op_val] == "put" or op_array[op_val] == "append"):
+        op_string = op_array[op_val] + "('" + key_array[key_val] + "','" + val_array[val_val] + "')"
+      elif (op_array[op_val] == "slice"):
+        first = random.randint(0, 10)
+        second = random.randint(first, 15)
+        op_string = op_array[op_val] + "('" +  key_array[key_val] + "','" + str(first) +":"+ str(second)+ "')"
+      elif (op_array[op_val] == "get"):
+        op_string = op_array[op_val] + "('" + key_array[key_val] + "')"
+      final_workload.append(op_string)
+    return final_workload
 
   def partitionWorkLoad(workload_string):
     workload_array = workload_string.split(';')
     workload_array = [x.strip(' ') for x in workload_array]
     if('pseudorandom' in  workload_array[0]):
       matchObj = re.match( r'\s*pseudorandom\(\s*(.*)\s*,\s*(.*)\s*\)', workload_array[0])
-      workload_array = getPseudoRandomWorkLoad( matchObj.group(1), matchObj.group(2) )
+      workload_array = getPseudoRandomWorkLoad( int(matchObj.group(1)), int(matchObj.group(2)) )
     return workload_array
 
   def addToTimeOut( workload ):
+    clientMsg("Request added to timeout DS with current timestamp.")
     timeout[ workload['id'] ] = {
       'time': time.time(),
       'workload': workload
@@ -133,25 +186,43 @@ class Node(process):
   def getMisbehaviorProof( client_response_object ):
     return client_response_object
 
+  def clientMsg(heading, dict={}, msg_type='action'):
+    if(msg_type=='imp'):
+      # output("\n==============================================================")
+      pass
+    # output("["+str(self)+"]["+ str(myPosition) + "] - " + heading)
+    output("["+ str(myPosition) + "] - " + str(heading) )
+    if(dict):
+      output("["+ str(myPosition) + "] - " + str(dict) )
+
 ############################################
 #  Received messages handler
 ############################################
   def receive(msg=('GetConfig_Response', replica_sequence, sign_verify_keys), from_=olympus):
-    output("Received GetConfig_Response from olympus.")
+    clientMsg("Received GetConfig_Response from olympus.")
+    clientMsg("Replica sequence received from olympus = ", replica_sequence)
+    clientMsg("Public Keys received from olympus = ", sign_verify_keys)
+    clientMsg("\n\n")
     self.replica_sequence = replica_sequence
     self.sequence_head    = replica_sequence[0]
     self.sign_verify_keys = sign_verify_keys
 
   def receive(msg=('Operation_Response', client_response_object), from_=replica_sequence):
-    output("Received Operation_Response from replica.")
+    clientMsg("Received Operation_Response from replica.", client_response_object)
 
     # validate response
     if( not validateResponse(client_response_object) ):
+      clientMsg("Validation of response failed.!")
       proof = getMisbehaviorProof(client_response_object)
       send(('Reconfig_Request', proof), to=olympus)
+      clientMsg("Sent Reconfig_Request to olympus.", proof)
       return
 
+    clientMsg("Response validated and found correct.")
+    clientMsg("Result received for operation =", client_response_object['result'])
+
+    # remove entry in timeout
     if( presentInTimeOut(client_response_object) ):
       deleteEntryInTimeOut( client_response_object['client_workload']['id'] )
-      output("Removed from timeout.")
-    print(client_response_object['result'])
+      clientMsg("Removed from timeout.")
+    clientMsg("\n\n")
