@@ -1,24 +1,97 @@
 ==================================================================================================
 		TESTING SCENARIOS
 ==================================================================================================
---------------------------------------------------------------------------------------------------
-1.	DESCRIPTION	:	Failure free scenario with 3 replicas and fault tolerance(t) as 1.
-	CONFIGFILES	:	no_failure_t1_c3/config.txt
-	LOGFILES	:	no_failure_t1_c3/olympus.log
-					no_failure_t1_c3/replica.log
-					no_failure_t1_c3/client.log
-	OTHER 		:	Client timeout value is taken as 100 ms, so as to avoid premature timeout.
-	OUTCOME 	:	PASS
-	AUTOCHECK	:	NA
+NOTE:	If config file name is config/<config_name>.txt, log files are named as follows -
+			logs/<config_name>_olympus.log
+			logs/<config_name>_replica.log
+			logs/<config_name>_client.log
 
 --------------------------------------------------------------------------------------------------
-2.	DESCRIPTION	:	Failure free scenario with 3 replicas and fault tolerance(t) as 1.
-	CONFIGFILES	:	no_failure_t1_c3/config.txt
-	LOGFILES	:	no_failure_t1_c3/olympus.log
-					no_failure_t1_c3/replica.log
-					no_failure_t1_c3/client.log
+1.	DESCRIPTION	:	Sanity testing by failure free scenario with 3 replicas and fault tolerance(t) as 1.
+	CONFIGFILES	:	no_failure_t1_c3.txt
 	OTHER 		:	Client timeout value is taken as 100 ms, so as to avoid premature timeout.
 	OUTCOME 	:	PASS
-	AUTOCHECK	:	NA
 
 --------------------------------------------------------------------------------------------------
+2.	DESCRIPTION	:	Sanity testing by failure free scenario with 3 replicas and fault tolerance(t) as 2.
+	CONFIGFILES	:	no_failure_t2_c3.txt
+	OTHER 		:	Client timeout value is taken as 100 ms, so as to avoid premature timeout.
+	OUTCOME 	:	PASS
+
+--------------------------------------------------------------------------------------------------
+3.	DESCRIPTION	:	Testing retransmission by client and handling of the retransmission from cache by replicas, by skipping TAIL replica reply to client.
+	CONFIGFILES	:	skip_tail_reply_t1_c2.txt
+	OTHER 		:	skip_tail_reply = 1 is set in config file to inject this failure. Client Timeout value is kept reasonably high for result shuttle to reach all nodes.
+	OUTCOME 	:	PASS
+
+--------------------------------------------------------------------------------------------------
+4.	DESCRIPTION	:	Testing retransmission by client and handling of the retransmission from cache by replicas, by skipping TAIL replica reply to client.
+	CONFIGFILES	:	skip_tail_reply_t2_c2.txt
+	OTHER 		:	skip_tail_reply = 1 is set in config file to inject this failure. Client Timeout value is kept reasonably high for result shuttle to reach all nodes.
+	OUTCOME 	:	PASS
+
+--------------------------------------------------------------------------------------------------
+5.	DESCRIPTION	:	Testing retransmission by client and handling of the same by replicas by setting timers, by maiking TAIL sleep before sending response to client.
+	CONFIGFILES	:	sleep_tail_reply_t1_c2.txt
+	OTHER 		:	sleep_before_send = 4 (in secs) is set in config file to inject this failure. Client Timeout value is kept reasonably low for result shuttle not to reach all nodes.
+	OUTCOME 	:	PASS
+
+--------------------------------------------------------------------------------------------------
+6.	DESCRIPTION	:	Testing retransmission by client and handling of the same by replicas by setting timers, by maiking TAIL sleep before sending response to client.
+	CONFIGFILES	:	sleep_tail_reply_t2_c2.txt
+	OTHER 		:	sleep_before_send = 4 (in secs) is set in config file to inject this failure. Client Timeout value is kept reasonably low for result shuttle not to reach all nodes.
+	OUTCOME 	:	PASS
+
+--------------------------------------------------------------------------------------------------
+7.	DESCRIPTION	:	To verify pseudorandom code sanity and reproducibility, all clients run same pseudorandom workload and seed.
+	CONFIGFILES	:	pseudorandom_all_same_t1_c3.txt
+	OTHER 		:	3 Clients and t=1 configured for sanity and simplicity.
+	OUTCOME 	:	PASS
+
+--------------------------------------------------------------------------------------------------
+8.	DESCRIPTION	:	Testing on more number of clients(10), to verify pseudorandom code sanity and reproducibility.
+	CONFIGFILES	:	pseudorandom_all_same_t1_c10.txt
+	OTHER 		:	10 Clients with 5 operations each; t=1 configured for replica side sanity and simplicity.
+	OUTCOME 	:	PASS
+
+--------------------------------------------------------------------------------------------------
+9.	DESCRIPTION	:	Testing on more number of clients(10) and t=2, to verify pseudorandom code integrity and reproducibility.
+	CONFIGFILES	:	pseudorandom_all_same_t2_c10.txt
+	OTHER 		:	10 Clients with 5 operations each; t=2 configured for moderate replica side workload.
+	OUTCOME 	:	PASS
+
+--------------------------------------------------------------------------------------------------
+10.	DESCRIPTION	:	Stress testing on more number of clients(10) with 100 operations on each client and t=2, to verify pseudorandom code integrity and reproducibility.
+	CONFIGFILES	:	pseudorandom_stress_t2_c10_o100.txt
+	OTHER 		:	Client timeout value is taken high to avoid flooding of system by retransmissions.
+	OUTCOME 	:	PASS
+
+--------------------------------------------------------------------------------------------------
+11.	DESCRIPTION	:	Validating conditions for failure trigger and injecting failure accordingly.
+	CONFIGFILES	:	client_request_condition_change_operation_failure_t1_c1.txt
+	OTHER 		:	Running with 1 client and t=1 for simplicity. Condition = client_request(0,2), Trigger Action = change_operation()
+	OUTCOME 	:	PASS
+
+--------------------------------------------------------------------------------------------------
+12.	DESCRIPTION	:	Validating conditions for failure trigger and injecting failure accordingly.
+	CONFIGFILES	:	client_request_condition_change_operation_failure_t2_c2.txt
+	OTHER 		:	Running with 2 clients and t=2 for integrity. Condition = client_request(0,2), Trigger Action = change_operation()
+	OUTCOME 	:	PASS
+
+--------------------------------------------------------------------------------------------------
+13.	DESCRIPTION	:	Validating conditions for failure trigger and injecting failure accordingly.
+	CONFIGFILES	:	shuttle_condition_change_operation_failure_t2_c2.txt
+	OTHER 		:	Running with 2 clients and t=2 for integrity. Skipping TAIL reply by (skip_tail_reply = 1) to get retransmissions by client. Condition = shuttle(0,2), Trigger Action = change_operation()
+	OUTCOME 	:	PASS
+
+--------------------------------------------------------------------------------------------------
+14.	DESCRIPTION	:	Multi-host testing of no failure case.
+	CONFIGFILES	:	multi_host_no_failure.txt
+	OTHER 		:	Running with 3 clients and t=2 for integrity testing.
+	OUTCOME 	:	PASS
+
+--------------------------------------------------------------------------------------------------
+15.	DESCRIPTION	:	Multi-host testing of failure case.
+	CONFIGFILES	:	multi_host_failure.txt
+	OTHER 		:	Running with 1 clients and t=1 for simplicity. Condition = client_request(0,2), Trigger Action = change_operation()
+	OUTCOME 	:	PASS
