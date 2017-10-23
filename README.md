@@ -74,6 +74,14 @@ CODE SIZE.
 The remaining 8% are for the functionalities interleaved with the algorithm.  
 
 ==========================================================================  
-LANGUAGE FEATURE USAGE. report the numbers of list comprehensions, dictionary comprehensions, set comprehensions, aggregations, and quantifications in your code.  the first two are Python features; the others are DistAlgo features.
+LANGUAGE FEATURE USAGE.  
+- number of list comprehensions: XX  
+- number of dictionary comprehensions: XX  
+- number of set comprehensions: XX  
+- number of aggregations: XX  
+- number of quantifications: XX  
 
-OTHER COMMENTS.  anything else you want us to know.
+
+==========================================================================  
+OTHER COMMENTS.  
+anything else you want us to know.
