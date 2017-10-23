@@ -3,7 +3,7 @@ Byzantine Chain Replication implementation on DistAlgo(Python).
 
 ==========================================================================
 PLATFORM.
-describe the software platform(s) used in your testing
+describe the software platform(s) used in your testing  
 including DistAlgo version
 Python implementation (normally CPython) and version
 operating system
