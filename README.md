@@ -2,13 +2,13 @@
 Byzantine Chain Replication implementation on DistAlgo(Python).
 
 ==========================================================================
-PLATFORM.
-describe the software platform(s) used in your testing  
-including DistAlgo version
-Python implementation (normally CPython) and version
-operating system
-and types of hosts (e.g., laptop (without any VMs), VMs running on VMWare Workstation Player on a laptop, VMs on Google Cloud Compute Engine, VMs on Amazon Web Services EC2).
-for testcases involving multiple hosts, specify the platform for each host.  [2017-10-05 added this]
+PLATFORM.  
+DistAlgo version: 1.0.9  
+Python implementation: CPython  
+Python version: 3.5.2  
+Operating system: macOS  
+Type of hosts: VMs on Google Cloud Compute Engine  
+Platform for each host:  
 
 ==========================================================================
 INSTRUCTIONS.  
