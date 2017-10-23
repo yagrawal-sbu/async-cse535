@@ -60,13 +60,18 @@ ROOT/olympus.da -> codes for Olympus
 ROOT/bcr.da     -> implements main function of the program  
 
 ==========================================================================
-CODE SIZE.
-(1a) report the numbers of non-blank non-comment lines of code (LOC) in your system in the following categories: algorithm, other, and total.
-     "algorithm" is for the algorithm itself and other functionality interleaved with it (fault injection, logging, debugging, etc.).
-     "other" is for everything that can easily be separated from the algorithm, e.g., configuration and testing.
-(1b) report how you obtained the counts (I use CLOC https://github.com/AlDanial/cloc).
-(2) give a rough estimate of how much of the "algorithm" code is for the algorithm itself, and how much is for other functionality interleaved with it.
+CODE SIZE.  
+(1)  
+(1a) The following categories of the system are reported in the number of non-blank non-comment lines of codes (LOC).  
+- Algorithm: XX  
+- Other: XX  
+- Total: XX  
+(1b)  CLOC (https://github.com/AlDanial/cloc) is used to derive the numbers above.  
+(2)  
+92% of the algorithm codes are for the algorithm itself.  
+The remaining 8% are for the functionalities interleaved with the algorithm.  
 
+==========================================================================  
 LANGUAGE FEATURE USAGE. report the numbers of list comprehensions, dictionary comprehensions, set comprehensions, aggregations, and quantifications in your code.  the first two are Python features; the others are DistAlgo features.
 
 OTHER COMMENTS.  anything else you want us to know.
