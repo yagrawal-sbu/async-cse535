@@ -70,10 +70,15 @@ def main():
   nonhead_timeout         = config['nonhead_timeout']
   failures                = config['failures']
 
+  x = 0
+  replicas_required = replicas_required - x
   # create new actors on specified nodes
   olympus     = new( Olympus.Node,                        at='OlympusNode' )
   client_set  = new( Client.Node , num=client_count,      at='ClientNode'  )
   replica_set = new( Replica.Node, num=replicas_required, at='ReplicaNode' )
+  if x:
+    replica_set2 = new( Replica.Node, num=x, at='ReplicaNode1' )
+    replica_set = replica_set.union(replica_set2)
 
   # create keys for client(s) and setup them
   counter = 0

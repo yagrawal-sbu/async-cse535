@@ -9,6 +9,7 @@
 *.py
 __pycache__/
 py3env/
+python3/
 
 # Packages #
 ############

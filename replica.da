@@ -377,6 +377,7 @@ class Node(process):
       replicaMsg("[Fault Injection] Condition matched for '"+log_type+"', client="+str(client_ID)+", message="+str(message_count)+".!")
     except KeyError:
       return
+    trigger_type.strip()
     if(trigger_type == 'change_operation'):
       changeOpFlag = True
     if(trigger_type == 'change_result'):
