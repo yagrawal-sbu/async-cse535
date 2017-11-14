@@ -31,6 +31,7 @@ class Node(process):
     self.failure_map = parseFailures(failure)
     self.config = config
 
+    self.state = 'OK'
     self.changeOpFlag = False
     self.changeResultFlag = False
     self.dropResStmtFlag = False
@@ -57,14 +58,14 @@ class Node(process):
       --replica_to_replica
 
       # check the timeout array for any timeout
-      for key, value in timeout.items():
-        now = time.time()
-        difference = int(now - value)
-        if(difference > replica_timeout_value):
-          replicaMsg("TimeOut expired for a request.")
-          send(('Reconfig_Request'), to=olympus)
-          replicaMsg("Sent Reconfig_Request to olympus.")
-          pass
+      if( workableState() ):
+        for key, value in timeout.items():
+          now = time.time()
+          difference = int(now - value)
+          if(difference > replica_timeout_value):
+            replicaMsg("TimeOut expired for a request.")
+            send(('Reconfig_Request'), to=olympus)
+            replicaMsg("Sent Reconfig_Request to olympus.")
 
 
 ############################################
@@ -414,28 +415,47 @@ class Node(process):
 
     return reverse_shuttle_object
 
+  def workableState():
+    if (state == 'OK'):
+      return True
+    else:
+      return False
+
 ############################################
 #  Received messages handler
 ############################################
   # handle operation requests from client
   def receive( msg=('Operation', encrypted_workload), from_=client ):
-    replicaMsg("Received operation request from client. Workload = ", encrypted_workload, msg_type='imp')
+    replicaMsg("Received Operation request from client. Workload = ", encrypted_workload, msg_type='imp')
+    if ( not workableState() ):
+      replicaMsg("Not in OK state.!")
+      return
+
     incrementCountLog('client_request', client)   # log message received from this client
     handleWorkload( encrypted_workload )          # do the workload
     replicaMsg("\n\n")
 
+
   # handle operation requests from client
   def receive( msg=('Forwarded_Operation', encrypted_workload), from_=replica_set ):
     replicaMsg("Received Forwarded_Operation request from a replica. Workload = ", encrypted_workload, msg_type='imp')
+    if ( not workableState() ):
+      replicaMsg("Not in OK state.!")
+      return
+
     incrementCountLog('forwarded_request', encrypted_workload['requester'])   # log message received from this client
     handleWorkload( encrypted_workload )                                      # do the workload
     replicaMsg("\n\n")
+
 
   # handle shuttle messages from other replicas
   def receive( msg=('Shuttle', shuttle_object), from_=replica_set ):
     # replicaMsg("Received Shuttle slot="+str(shuttle_object['slot'])+". Shuttle_Object=", shuttle_object, msg_type='imp')
     replicaMsg("Received Shuttle slot="+str(shuttle_object['slot'])+".", shuttle_object, msg_type='imp')
     incrementCountLog('shuttle', shuttle_object['client_workload']['requester'] )   # log the shuttle message received for this client
+    if ( not workableState() ):
+      replicaMsg("Not in OK state.!")
+      return
 
     # validate shuttle first
     if( not validateShuttleObject(shuttle_object) ):
@@ -479,10 +499,14 @@ class Node(process):
       replicaMsg("Forward Shuttle to the next replica.", shuttle_object)
     replicaMsg("\n\n")
 
+
   # handle reverse shuttle messages from other replicas
   def receive( msg=('Reverse_Shuttle', reverse_shuttle_object), from_=replica_set ):
     replicaMsg("Received Reverse_Shuttle slot="+str(reverse_shuttle_object['slot'])+".", reverse_shuttle_object, msg_type='imp')
     incrementCountLog('result_shuttle', reverse_shuttle_object['client_workload']['requester'] )    # log the shuttle message received for this client
+    if ( not workableState() ):
+      replicaMsg("Not in OK state.!")
+      return
 
     # validate shuttle first
     if( not validateShuttleObject(reverse_shuttle_object, shuttle_type='reverse') ):
@@ -508,4 +532,10 @@ class Node(process):
       send(('Reverse_Shuttle', reverse_shuttle_object), to=pre)
       replicaMsg("Sent Reverse_Shuttle to previous replica.", reverse_shuttle_object)
     replicaMsg("\n\n")
+
+
+  # handle requests from olympus
+  def receive( msg=('Wedge_Request'), from_=olympus ):
+    replicaMsg("Received Wedge_Request request olympus.", msg_type='imp')
+    state = 'WEDGE'
 

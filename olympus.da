@@ -18,7 +18,7 @@ class Node(process):
     self.head_timeout           = head_timeout
     self.nonhead_timeout        = nonhead_timeout
     self.client_public_keys     = client_public_keys
-    self.config_ID              = 0
+    self.config_ID              = -1
     self.client_seq_no          = client_seq_no
     self.failures               = failures
 
@@ -44,6 +44,7 @@ class Node(process):
 
   # start the replicas
   def startReplicas():
+    config_ID += 1  # increase the configID
     replicas_required = 2*fault_tolerance_factor + 1
 
     for replica_id in set(replica_set):
@@ -93,7 +94,10 @@ class Node(process):
 
   def receive(msg=('Reconfig_Request',), from_=replica_set):
     output("Received Reconfig_Request request from a replica.\n\n")
+    send(('Wedge_Request'), to=replica_sequence)
 
   def receive(msg=('Reconfig_Request', proof), from_=client):
     output("Received Reconfig_Request request from a client.\n\n")
+    # verify the proof of misbehavior
+    send(('Wedge_Request'), to=replica_sequence)
 

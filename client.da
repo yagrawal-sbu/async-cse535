@@ -23,6 +23,10 @@ class Node(process):
     self.sign_verify_keys = []
     self.private_key = private_key
     self.fault_tolerance_factor = fault_tolerance_factor
+    self.objDict = {}
+
+    self.doNotResend = True # for debugging simplicity
+    self.reconfigAfterOpsFlag = True # for debugging simplicity
 
   # main execution flow of the client
   def run():
@@ -36,12 +40,15 @@ class Node(process):
         difference = int(now - value['time'])
         difference *= 1000
         if(difference > client_timeout):      #send to all nodes
+          send(('GetConfig',), to=olympus)
+          # wait for response before proceeding here
+          if(doNotResend): # for debugging simplicity
+            continue
           if( value['workload']['retransmit'] == 1 ):
             clientMsg("Timeout expired for retransmitted request=", key)
             workload = timeout[key]['workload']
             send(('Operation', workload), to=replica_sequence)
             clientMsg("Sent Operation request to all replicas.", workload)
-            pass
           else:
             clientMsg("Timeout expired for request=", key)
             timeout[key]['workload']['retransmit'] = 1
@@ -57,6 +64,7 @@ class Node(process):
       # send operation request to replica head
       if replica_sequence and operations_array:
         op = operations_array[0]
+        doWork(op);
         workload = create_workload_object(op)
         operations_array.pop(0)
         send(('Operation', workload), to=sequence_head)
@@ -65,12 +73,69 @@ class Node(process):
         addToTimeOut( workload )        # append to timeout array with timestamp
         clientMsg("\n\n")
 
+      # if no operations left, wait for all responses
+      if (not operations_array):
+        pass
+        if(reconfigAfterOpsFlag):
+          proof = {}
+          send(('Reconfig_Request', proof), to=olympus)
+          reconfigAfterOpsFlag = False
+        # break
+
+    # output client copy of dictionary
+    clientMsg(objDict)
+
+
 
 ############################################
 #  Helper Functions
 ############################################
   # add client unique identifier
   # add own address
+  def doWork(work):
+    clientMsg("Client performing operation= "+ work)
+    matchObj = re.match( r'\s*(put|get|append|slice)\((.*)\)\s*', work)
+
+    # if no valid operation or first operator is found
+    if( (not matchObj.group()) or (not matchObj.group(1)) or (not matchObj.group(2)) ):
+      return 'fail'
+
+    operand_str = matchObj.group(2).strip()
+
+    if(matchObj.group(1) == 'put'):
+      matchObj = re.match( r'\'(.*)\'\s*,\s*\'(.*)\'', operand_str)
+      objDict[matchObj.group(1)] = matchObj.group(2)
+      return 'OK'
+
+    if(matchObj.group(1) == 'get'):
+      matchObj = re.match( r'\'(.*)\'.*', operand_str)
+      if( matchObj.group(1) in objDict.keys() ):
+        return objDict[matchObj.group(1)]
+      else:
+        return ''
+
+    if(matchObj.group(1) == 'append'):
+      matchObj = re.match( r'\'(.*)\'\s*,\s*\'(.*)\'', operand_str)
+      if( not matchObj.group(1) in objDict.keys() ):
+        return 'fail'
+      else:
+        objDict[ matchObj.group(1) ] += matchObj.group(2)
+        return 'OK'
+
+    if(matchObj.group(1) == 'slice'):
+      matchObj = re.match( r'\'(.*)\'\s*,\s*\'(.*)\'', operand_str)
+      if( not matchObj.group(1) in objDict.keys() ):
+        return 'fail'
+      else:
+        # TODO, add valid slice length check here
+        indicesObj = re.match( r'(.*):(.*)', matchObj.group(2))
+        index1 = int( indicesObj.group(1) )
+        index2 = int( indicesObj.group(2) )
+        objDict[ matchObj.group(1) ] = objDict[ matchObj.group(1) ][ index1:index2 ]
+        return 'OK'
+
+    return ''
+
   def create_workload_object(operation):
     print(operation)
     workload_to_be_encrpyted = {
