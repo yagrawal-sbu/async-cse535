@@ -143,6 +143,7 @@ class Node(process):
   def sendCatchUp():
     # find longest history in quorum
     max_len_history = quorum[0]['history']
+    max_hist_replica = 0
     for wedgeResponse in quorum:
       if len(wedgeResponse['history']) > len(max_len_history):
         max_len_history = wedgeResponse['history']
