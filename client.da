@@ -24,8 +24,11 @@ class Node(process):
     self.private_key = private_key
     self.fault_tolerance_factor = fault_tolerance_factor
     self.objDict = {}
+    self.waitForResponse = False
+    self.waitingForConfigResult = False
+    self.config_ID = -1
 
-    self.doNotResend = True # for debugging simplicity
+    self.ignoreTimeout = False # for debugging simplicity
     self.reconfigAfterOpsFlag = True # for debugging simplicity
 
   # main execution flow of the client
@@ -35,34 +38,47 @@ class Node(process):
       clientMsg("Sent GetConfig request to olympus.\n\n")
     while(True):
       # check if any entry in timeout_array has expired
-      for key, value in timeout.items():
-        now = time.time()
-        difference = int(now - value['time'])
-        difference *= 1000
-        if(difference > client_timeout):      #send to all nodes
-          send(('GetConfig',), to=olympus)
-          # wait for response before proceeding here
-          if(doNotResend): # for debugging simplicity
-            continue
-          if( value['workload']['retransmit'] == 1 ):
-            clientMsg("Timeout expired for retransmitted request=", key)
-            workload = timeout[key]['workload']
-            send(('Operation', workload), to=replica_sequence)
-            clientMsg("Sent Operation request to all replicas.", workload)
-          else:
-            clientMsg("Timeout expired for request=", key)
-            timeout[key]['workload']['retransmit'] = 1
-            workload = timeout[key]['workload']
-            send(('Operation', workload), to=replica_sequence)
-            clientMsg("Sent Operation request to all replicas.", workload)
-            timeout[key]['time'] = time.time()  #reset the timer
-          clientMsg("\n\n")
+      if(not ignoreTimeout):
+        for key, value in timeout.items():
+          now = time.time()
+          difference = int(now - value['time'])
+          difference *= 1000
+          if(difference > client_timeout):      #send to all nodes
+            # first check if sequence has changed
+            send(('GetConfig',), to=olympus)
+            waitingForConfigResult = True
+            while waitingForConfigResult:
+              --response_from_olympus
+
+            # if sequence has changed
+            if not value['config_ID']==config_ID:
+              clientMsg("Config has changed for replicas.")
+              timeout[key]['workload']['retransmit'] = 0
+              workload = timeout[key]['workload']
+              send(('Operation', workload), to=sequence_head)
+              clientMsg("Sent Operation request to new replica head.", workload)
+              timeout[key]['time'] = time.time()  #reset the timer
+            # if sequence has not changed
+            else:
+              if( value['workload']['retransmit'] == 1 ):
+                clientMsg("Timeout expired for retransmitted request=", key)
+                # workload = timeout[key]['workload']
+                # send(('Operation', workload), to=replica_sequence)
+                # clientMsg("Sent Operation request to all replicas.", workload)
+              else:
+                clientMsg("Timeout expired for request=", key)
+                timeout[key]['workload']['retransmit'] = 1
+                workload = timeout[key]['workload']
+                send(('Operation', workload), to=replica_sequence)
+                clientMsg("Sent Operation request to all replicas.", workload)
+                timeout[key]['time'] = time.time()  #reset the timer
+              clientMsg("\n\n")
 
       # yield point to receive messages
       --accept_msgs
 
       # send operation request to replica head
-      if replica_sequence and operations_array:
+      if replica_sequence and operations_array and (not waitForResponse):
         op = operations_array[0]
         doWork(op);
         workload = create_workload_object(op)
@@ -71,20 +87,20 @@ class Node(process):
         clientMsg("Sent Operation request to replica head.", op)
         clientMsg(workload)
         addToTimeOut( workload )        # append to timeout array with timestamp
+        waitForResponse = True
         clientMsg("\n\n")
 
       # if no operations left, wait for all responses
       if (not operations_array):
-        pass
         if(reconfigAfterOpsFlag):
           proof = {}
           send(('Reconfig_Request', proof), to=olympus)
+          clientMsg("Reconfig_Request sent to Olympus.\n\n")
           reconfigAfterOpsFlag = False
         # break
 
     # output client copy of dictionary
     clientMsg(objDict)
-
 
 
 ############################################
@@ -239,7 +255,8 @@ class Node(process):
     clientMsg("Request added to timeout DS with current timestamp.")
     timeout[ workload['id'] ] = {
       'time': time.time(),
-      'workload': workload
+      'workload': workload,
+      'config_ID': config_ID
     }
 
   def presentInTimeOut( client_response_object ):
@@ -263,14 +280,29 @@ class Node(process):
 ############################################
 #  Received messages handler
 ############################################
-  def receive(msg=('GetConfig_Response', replica_sequence, sign_verify_keys), from_=olympus):
+  def receive(msg=('GetConfig_Response', replica_sequence, sign_verify_keys, config_ID), from_=olympus):
     clientMsg("Received GetConfig_Response from olympus.")
     clientMsg("Replica sequence received from olympus = ", replica_sequence)
     clientMsg("Public Keys received from olympus = ", sign_verify_keys)
     clientMsg("\n\n")
     self.replica_sequence = replica_sequence
     self.sequence_head    = replica_sequence[0]
+    self.config_ID        = config_ID
     self.sign_verify_keys = sign_verify_keys
+    self.waitingForConfigResult = False
+
+  def receive(msg=('Olympus_Operation_Response', client_response_object), from_=olympus):
+    clientMsg("Received Operation_Response from olympus.", client_response_object)
+    # no need to validate response from olympus
+    clientMsg("Result received for id=", client_response_object['client_workload']['id'])
+    clientMsg("Result received=", client_response_object['client_workload']['result'])
+
+    # remove entry in timeout
+    if( presentInTimeOut(client_response_object) ):
+      deleteEntryInTimeOut( client_response_object['client_workload']['id'] )
+      clientMsg("Removed from timeout.")
+      waitForResponse = False
+    clientMsg("\n\n")
 
   def receive(msg=('Operation_Response', client_response_object), from_=replica_sequence):
     clientMsg("Received Operation_Response from replica.", client_response_object)
@@ -284,10 +316,12 @@ class Node(process):
       return
 
     clientMsg("Response validated and found correct.")
-    clientMsg("Result received for operation =", client_response_object['result'])
+    clientMsg("Result received for operation=", client_response_object['result'])
 
     # remove entry in timeout
     if( presentInTimeOut(client_response_object) ):
       deleteEntryInTimeOut( client_response_object['client_workload']['id'] )
       clientMsg("Removed from timeout.")
+      waitForResponse = False
     clientMsg("\n\n")
+

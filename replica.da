@@ -1,10 +1,10 @@
+import os
 import re
 import time
 import pickle
+import logging
 import nacl.encoding
 import nacl.signing
-import pprint
-pp = pprint.PrettyPrinter(indent=4)
 
 # define the replica process
 class Node(process):
@@ -15,7 +15,7 @@ class Node(process):
 ############################################
 
   # define the setup for the client
-  def setup(olympus, replica_type, pre, post, fault_tolerance_factor, replica_sign_key, sign_verify_keys, replica_timeout_value, client_public_keys, config_ID, myPosition, replica_sequence, client_seq_no, failure, config):
+  def setup(olympus, replica_type, pre, post, fault_tolerance_factor, replica_sign_key, sign_verify_keys, replica_timeout_value, client_public_keys, config_ID, myPosition, replica_sequence, client_seq_no, failure, config, checkpt_interval, replica_start_state):
     self.olympus = olympus
     self.myReplicaType = replica_type
     self.pre = pre
@@ -30,22 +30,31 @@ class Node(process):
     self.client_seq_no = client_seq_no
     self.failure_map = parseFailures(failure)
     self.config = config
+    self.history = []
+    self.checkpt_interval = checkpt_interval
+    self.objDict = replica_start_state
 
+    self.lastest_checkpt = 0
     self.state = 'OK'
     self.changeOpFlag = False
     self.changeResultFlag = False
     self.dropResStmtFlag = False
-    self.objDict = {}
+    self.tempObjDict = {}
     self.result_cache = {}
     self.response_cache = {}
     self.slot = 0
+    self.checkpt_no = 0
     self.timeout = {}
+    self.latest_checkpt_proof = []
+    self.last_client_result = {}
     self.count_log = {
       'client_request': {},
       'forwarded_request': {},
       'shuttle': {},
       'result_shuttle': {}
     }
+    replicaMsg("i am alive.! :D")
+    replicaMsg("objDict at start=", objDict)
 
   # main execution flow of the client
   def run():
@@ -103,6 +112,7 @@ class Node(process):
       replicaMsg("Client request is a new request.")
       if(myReplicaType=="HEAD"):
         result = doWork(workload['operation'])
+        saveToClientWork(workload, result)
         shuttle_object = create_shuttle_object(workload)
         addMyStatements(shuttle_object, result)
         addToResultCache( workload['id'], result )
@@ -116,6 +126,12 @@ class Node(process):
         else:
           send(('Shuttle', shuttle_object), to=post)
           replicaMsg("Sent Shuttle to next node.", shuttle_object)
+          # send checkpoint proof
+          if(slot%checkpt_interval==0):
+            checkpt_object = create_checkpt_obj()
+            addMyState(checkpt_object)
+            send(('CheckPoint', checkpt_object), to=post)
+            replicaMsg("Sent CheckPoint to next node.", checkpt_object)
       else:
         send(('Forwarded_Operation', encrypted_workload), to=replica_sequence[0])
         replicaMsg("Client new request received on a non-head replica. Forwarding request to head.", encrypted_workload)
@@ -164,6 +180,56 @@ class Node(process):
 
     return ''
 
+  def saveToClientWork(workload, result):
+    last_client_result[ workload['requester'] ] = {
+      'id': workload['id'],
+      'result': result
+    }
+
+  def doTempWork(work):
+    replicaMsg("Replica performing operation= "+ work)
+    matchObj = re.match( r'\s*(put|get|append|slice)\((.*)\)\s*', work)
+
+    # if no valid operation or first operator is found
+    if( (not matchObj.group()) or (not matchObj.group(1)) or (not matchObj.group(2)) ):
+      return 'fail'
+
+    operand_str = matchObj.group(2).strip()
+
+    if(matchObj.group(1) == 'put'):
+      matchObj = re.match( r'\'(.*)\'\s*,\s*\'(.*)\'', operand_str)
+      tempObjDict[matchObj.group(1)] = matchObj.group(2)
+      return 'OK'
+
+    if(matchObj.group(1) == 'get'):
+      matchObj = re.match( r'\'(.*)\'.*', operand_str)
+      if( matchObj.group(1) in tempObjDict.keys() ):
+        return tempObjDict[matchObj.group(1)]
+      else:
+        return ''
+
+    if(matchObj.group(1) == 'append'):
+      matchObj = re.match( r'\'(.*)\'\s*,\s*\'(.*)\'', operand_str)
+      if( not matchObj.group(1) in tempObjDict.keys() ):
+        return 'fail'
+      else:
+        tempObjDict[ matchObj.group(1) ] += matchObj.group(2)
+        return 'OK'
+
+    if(matchObj.group(1) == 'slice'):
+      matchObj = re.match( r'\'(.*)\'\s*,\s*\'(.*)\'', operand_str)
+      if( not matchObj.group(1) in tempObjDict.keys() ):
+        return 'fail'
+      else:
+        # TODO, add valid slice length check here
+        indicesObj = re.match( r'(.*):(.*)', matchObj.group(2))
+        index1 = int( indicesObj.group(1) )
+        index2 = int( indicesObj.group(2) )
+        tempObjDict[ matchObj.group(1) ] = tempObjDict[ matchObj.group(1) ][ index1:index2 ]
+        return 'OK'
+
+    return ''
+
   def getSigned(string):
     return my_private_key.sign( string )
 
@@ -189,8 +255,27 @@ class Node(process):
     }
     return shuttle_object
 
+  def create_checkpt_obj():
+    checkpt_no += 1
+    replicaMsg("New checkpoint object created with checkpt_no="+str(checkpt_no))
+    obj = {
+      'checkpt_no': checkpt_no,
+      'history_len': [],
+      'checkpt_statements': []
+    }
+    return obj
+
+  def addMyState(checkpt_object):
+    hist_len = len(history)
+    checkpt_stmt = getSigned( pickle.dumps(objDict) )
+    history.append( (checkpt_object['checkpt_no'], hist_len, checkpt_stmt) )
+    checkpt_object['history_len'].append( hist_len )
+    checkpt_object['checkpt_statements'].append( checkpt_stmt )
+    replicaMsg("Added my CheckPoint statements.")
+
   def addMyStatements(shuttle_object, result):
     operation = shuttle_object['client_workload']['operation']
+    history.append((slot, operation));
 
     # inject failure of change operation
     if(changeOpFlag):
@@ -280,6 +365,52 @@ class Node(process):
 
     return True
 
+  def validateCheckPtObject( checkpt_object, checkpt_type='forward'):
+
+    if(checkpt_type == 'forward'):
+      # 1. look for slot holes
+      if( checkpt_object['checkpt_no'] != checkpt_no+1 ):
+        print("Found hole in checkpoint slot.")
+        return False
+      if(slot%checkpt_interval!=0):
+        replicaMsg("Should not be receiving checkpoint message now.!")
+        return False
+
+    # 2. validate size of both proofs same or not
+    if( len(checkpt_object['history_len']) != len(checkpt_object['checkpt_statements']) ):
+      print("Size of history_len and checkpt_statements arrays do not match.")
+      return False
+
+    # 3. validate signature and then contents
+    myObjPickle = pickle.dumps(objDict)
+    history_lens = checkpt_object['history_len']
+    checkpt_statements = checkpt_object['checkpt_statements']
+    for counter in range(0, len(checkpt_statements)):
+      # validate signature first
+      public_key = sign_verify_keys[counter]
+      try:
+        decrypted_checkpt_stat = public_key.verify( checkpt_statements[counter] )
+      except nacl.exceptions.BadSignatureError:
+        print("Signature of replica '"+str(counter)+"'' did not match.")
+        return False
+
+      # validate with my own picke of myDict
+      if(checkpt_type == 'forward'):
+        if(myObjPickle!=decrypted_checkpt_stat):
+          print("State of replica '"+str(counter)+"'' did not match.")
+          return False
+        # 2. check if my history len is same as previous replicas
+        if( history_lens[counter] != len(history) ):
+          print("Found hole in history length.")
+          return False
+
+    # if control reaches here, means valid shuttle
+    # do necessary operations
+    if(checkpt_type == 'forward'):
+      checkpt_no += 1
+
+    return True
+
   def clientUnsignWorkload(workload):
     if workload['requester'] in client_public_keys:
       public_key = client_public_keys[ workload['requester'] ]
@@ -299,6 +430,7 @@ class Node(process):
 
   def create_cli_res_obj(shuttle_object, result):
     client_response_object = {
+      'sender': self,
       'client_workload': shuttle_object['client_workload'],
       'result': result,
       'result_proof': shuttle_object['result_proof']['result_hashes']
@@ -391,9 +523,9 @@ class Node(process):
       # output("\n==============================================================")
       pass
     # output("["+str(self)+"]["+ str(myPosition) + "] - " + heading)
-    output("["+ str(myPosition) + "] - " + str(heading) )
+    output("["+ str(config_ID) +"]"+"["+ str(myPosition) + "] - " + str(heading) )
     if(dict):
-      output("["+ str(myPosition) + "] - " + str(dict) )
+      output("["+ str(config_ID) +"]"+"["+ str(myPosition) + "] - " + str(dict) )
 
   def makeChangesToReverseShuttle(reverse_shuttle_object):
     #currently only used for fault injection
@@ -421,6 +553,28 @@ class Node(process):
     else:
       return False
 
+  def createWedgeResponseObject():
+    obj = {
+      'config_ID': config_ID,
+      'myPosition': myPosition,
+      'history': history,
+      'lastest_checkpt': lastest_checkpt,
+      'latest_checkpt_proof': latest_checkpt_proof
+    }
+    return obj
+
+  def updateHistoryForCheckPoint(checkpt_object):
+    index = 0
+    for entry in history:
+      if( len(entry)!=3 ):
+        index += 1
+      else:
+        break
+    history = history[index:]
+    latest_checkpt_proof = checkpt_object['checkpt_statements']
+    lastest_checkpt = checkpt_object['checkpt_no']
+    replicaMsg("History before checkpt_no="+str(checkpt_object['checkpt_no'])+" deleted.!")
+
 ############################################
 #  Received messages handler
 ############################################
@@ -435,7 +589,6 @@ class Node(process):
     handleWorkload( encrypted_workload )          # do the workload
     replicaMsg("\n\n")
 
-
   # handle operation requests from client
   def receive( msg=('Forwarded_Operation', encrypted_workload), from_=replica_set ):
     replicaMsg("Received Forwarded_Operation request from a replica. Workload = ", encrypted_workload, msg_type='imp')
@@ -447,7 +600,6 @@ class Node(process):
     handleWorkload( encrypted_workload )                                      # do the workload
     replicaMsg("\n\n")
 
-
   # handle shuttle messages from other replicas
   def receive( msg=('Shuttle', shuttle_object), from_=replica_set ):
     # replicaMsg("Received Shuttle slot="+str(shuttle_object['slot'])+". Shuttle_Object=", shuttle_object, msg_type='imp')
@@ -456,6 +608,8 @@ class Node(process):
     if ( not workableState() ):
       replicaMsg("Not in OK state.!")
       return
+
+    # check if any checkpoint is missed before this slot
 
     # validate shuttle first
     if( not validateShuttleObject(shuttle_object) ):
@@ -467,6 +621,7 @@ class Node(process):
 
     # perform the operation and get the result
     result = doWork(shuttle_object['client_workload']['operation'])
+    saveToClientWork(shuttle_object['client_workload'], result)
     # check if result matches with the crypto hash
     addMyStatements(shuttle_object, result)
     addToResultCache( shuttle_object['client_workload']['id'], result )
@@ -498,7 +653,6 @@ class Node(process):
       send(('Shuttle', shuttle_object), to=post)
       replicaMsg("Forward Shuttle to the next replica.", shuttle_object)
     replicaMsg("\n\n")
-
 
   # handle reverse shuttle messages from other replicas
   def receive( msg=('Reverse_Shuttle', reverse_shuttle_object), from_=replica_set ):
@@ -533,9 +687,89 @@ class Node(process):
       replicaMsg("Sent Reverse_Shuttle to previous replica.", reverse_shuttle_object)
     replicaMsg("\n\n")
 
+  # handle checkpoint messages from other replicas
+  def receive( msg=('CheckPoint', checkpt_object), from_=replica_set ):
+    replicaMsg("Received CheckPoint="+str(checkpt_object['checkpt_no'])+".", checkpt_object, msg_type='imp')
+    if ( not workableState() ):
+      replicaMsg("Not in OK state.!")
+      return
+
+    # validate shuttle first
+    if( not validateCheckPtObject(checkpt_object) ):
+      replicaMsg("Valid`t.!")
+      send(('Reconfig_Request'), to=olympus)
+      replicaMsg("Sent Reconfig_Request to olympus.\n\n")
+      return
+    replicaMsg("Validation success for checkpt_object.")
+
+    # perform the actions
+    addMyState(checkpt_object)
+
+    # take further action based on replica type
+    if( myReplicaType=='TAIL' ):
+      replicaMsg("I am TAIL.")
+      # start reverse shuttle
+      updateHistoryForCheckPoint( checkpt_object )
+      send(('Reverse_CheckPoint', checkpt_object), to=pre)
+      replicaMsg("Sent Reverse_CheckPoint to previous replica.", checkpt_object)
+    else:
+      # inner node will forward shuttle to succeding replica
+      send(('CheckPoint', checkpt_object), to=post)
+      replicaMsg("Forward CheckPoint to the next replica.", checkpt_object)
+    replicaMsg("\n\n")
+
+  # handle reverse checkpoint messages from other replicas
+  def receive( msg=('Reverse_CheckPoint', checkpt_object), from_=replica_set ):
+    replicaMsg("Received Reverse_CheckPoint slot="+str(checkpt_object['checkpt_no'])+".", checkpt_object, msg_type='imp')
+    if ( not workableState() ):
+      replicaMsg("Not in OK state.!")
+      return
+
+    # validate shuttle first
+    if( not validateCheckPtObject(checkpt_object, checkpt_type='reverse') ):
+      replicaMsg("Validation failed for checkpt_object.!")
+      send(('Reconfig_Request'), to=olympus)
+      replicaMsg("Sent Reconfig_Request to olympus.")
+      return
+    replicaMsg("Validation success for checkpt_object.")
+
+    updateHistoryForCheckPoint( checkpt_object )       # cache the workload for retransmit in future
+
+    # forward to previous replica, if not head
+    if( myReplicaType!='HEAD' and pre ):
+      # reverse_shuttle_object = makeChangesToReverseShuttle( reverse_shuttle_object )
+      send(('Reverse_CheckPoint', checkpt_object), to=pre)
+      replicaMsg("Sent Reverse_CheckPoint to previous replica.", reverse_shuttle_object)
+    replicaMsg("\n\n")
 
   # handle requests from olympus
   def receive( msg=('Wedge_Request'), from_=olympus ):
     replicaMsg("Received Wedge_Request request olympus.", msg_type='imp')
-    state = 'WEDGE'
+    state = 'IMMUTABLE'
+    wedgeRespObj = createWedgeResponseObject()
+    send(('Wedge_Response', wedgeRespObj), to=olympus)
+    replicaMsg("Sent Wedge_Response to olympus.", msg_type='imp')
 
+  # handle catch up request
+  def receive( msg=('CatchUp_Request', catchup_object), from_=olympus ):
+    replicaMsg("Received CatchUp_Request from olympus.", catchup_object, msg_type='imp')
+    if ( workableState() ):
+      replicaMsg("Cannot do CatchUp_Request in OK state.!")
+      return
+
+    operations = catchup_object['operations']
+    tempObjDict = objDict
+    for operation in operations:
+      doTempWork(operation)
+
+    catchup_object['state'] = tempObjDict
+    catchup_object['last_client_result'] = last_client_result
+    send(('CatchUp_Response', catchup_object), to=olympus)
+    replicaMsg("Sent CatchUp_Response to olympus.", catchup_object)
+    output("\n\n\n")
+
+  # handle message to die
+  def receive( msg=('Suicide'), from_=olympus ):
+    replicaMsg("Olympus asked me to die. :/ ", msg_type='imp')
+    logging.shutdown()
+    # os._exit(-1)

@@ -1,5 +1,9 @@
+import time
+import random
 import nacl.encoding
 import nacl.signing
+
+Replica = import_da('replica')
 
 # define the master process
 class Node(process):
@@ -9,19 +13,29 @@ class Node(process):
 # Necessary functions setup and run
 ############################################
   # define the setup for the master
-  def setup(fault_tolerance_factor, replica_set, head_timeout, nonhead_timeout, client_public_keys, client_seq_no, failures, config):
+  def setup(fault_tolerance_factor, head_timeout, nonhead_timeout, client_public_keys, client_seq_no, failures, config, checkpt_interval):
     self.fault_tolerance_factor = fault_tolerance_factor
     self.replica_sequence       = []
-    self.replica_set            = replica_set
+    self.replica_set            = []
     self.sign_keys              = []
     self.sign_verify_keys       = []
     self.head_timeout           = head_timeout
     self.nonhead_timeout        = nonhead_timeout
     self.client_public_keys     = client_public_keys
     self.config_ID              = -1
+    self.replica_start_state    = {}
     self.client_seq_no          = client_seq_no
     self.failures               = failures
-
+    self.wedgeResponses         = []
+    self.catchUpResponses       = []
+    self.reconfigInProgress     = False
+    self.waitingForCatchUp      = False
+    self.checkpt_interval       = checkpt_interval
+    self.quorum                 = []
+    self.max_hist_replica       = 0 # default value
+    self.last_client_result     = {}
+    self.sleepTimeBeforeNewSequence = 3
+    self.clientsWaitingForConfigResponse = []
 
   # main execution flow for the master
   def run():
@@ -30,10 +44,149 @@ class Node(process):
       --replica_to_olympus
       --client_to_olympus
 
+      # if reconfig in process, then process the quorum
+      if reconfigInProgress:
+        if waitingForCatchUp:
+          # verify catchup
+          if len(catchUpResponses)==fault_tolerance_factor+1:
+            if not validCatchUp():
+              waitingForCatchUp = False
+              continue
+            sendClientResponses()
+            send(('Suicide'), to=replica_sequence)
+            # sleep for some time, for clarity in logs
+            time.sleep( sleepTimeBeforeNewSequence )
+            startReplicas()
+            reconfigInProgress = False
+        else:
+          if len(wedgeResponses) > fault_tolerance_factor:
+            output("Have enough wedgeResponses to create a Quorum.")
+            createNewQuorum()  # generate a random quorum
+            if( isValidQuorum() ):  # verify the quorum
+              sendCatchUp()
+              waitingForCatchUp = True
 
 ############################################
 #  Helper Functions
-############################################
+############################################:
+  # generate a random quorum
+  def createNewQuorum():
+    quorum = [] # global
+    added = []
+    replicas = []
+    while len(quorum) != fault_tolerance_factor+1:
+      current = random.randint(0, len(wedgeResponses)-1)
+      if(current not in added):
+        quorum.append( wedgeResponses[current] )
+        added.append(current)
+        replicas.append( wedgeResponses[current]['myPosition'] )
+    output("Created a new Quorum with", *replicas )
+
+  def isValidQuorum():
+    output("Started validation of this Quorum.")
+    highest_checkpt_no = 0
+    highest_checkpt_statement = []
+
+    # first get the highest checkpoint proof
+    for wedgeResponse in quorum:
+      if wedgeResponse['lastest_checkpt'] > highest_checkpt_no:
+        highest_checkpt_no = wedgeResponse['lastest_checkpt']
+        highest_checkpt_statement = wedgeResponse['latest_checkpt_proof']
+
+    # if found max checkpoint, validate all its entries
+    if len(highest_checkpt_statement):
+      output("Found highest checkpoint="+str(highest_checkpt_no)+".")
+      if not validCheckPtStat(highest_checkpt_statement):
+        return False
+      trucateReceivedHistory(highest_checkpt_no)
+
+    if not validateQuorumHistory():
+      return False
+
+    output("Quorum is valid.!")
+    return True
+
+  # truncates all history before the highest verified checkpoint
+  def trucateReceivedHistory(highest_checkpt_no):
+    output("For each wedge response in quorum, truncating all history before checkpoint="+str(highest_checkpt_no)+".")
+    for wedgeResponse in quorum:
+      index = 0
+      for entry in wedgeResponse['history']:
+        if( len(entry)!=3 and entry[0]!=highest_checkpt_no):
+          index += 1
+        else:
+          break
+      wedgeResponse['history'] = wedgeResponse['history'][index:]
+    output("Removing all checkpoints in remaining history.")
+    for wedgeResponse in quorum:
+      wedgeResponse['history'][:] = [value for value in wedgeResponse['history'] if len(value)==2]
+
+  # validate the history for same operations
+  def validateQuorumHistory():
+    # find min length
+    min_len_history = quorum[0]['history']
+    for wedgeResponse in quorum:
+      if len(wedgeResponse['history']) < len(min_len_history):
+        min_len_history = wedgeResponse['history']
+    output("min length history=", *min_len_history)
+
+    for wedgeResponse in quorum:
+      common_history = wedgeResponse['history'][:len(min_len_history)]
+      output( common_history )
+      if not common_history == min_len_history:
+        output("Found mismatch in history, this quorum is invalid.!.")
+        return False
+
+    output("Validated consistency of history in wedge responses.")
+    return True
+
+  def sendCatchUp():
+    # find longest history in quorum
+    max_len_history = quorum[0]['history']
+    for wedgeResponse in quorum:
+      if len(wedgeResponse['history']) > len(max_len_history):
+        max_len_history = wedgeResponse['history']
+        max_hist_replica = wedgeResponse['myPosition']
+    output("max length history=", *max_len_history)
+
+    catchUpResponses = []
+    # for each element in the quorum, splice and send that replica catchup with ops
+    for wedgeResponse in quorum:
+      catchup_object = getCatchUpObj(wedgeResponse['history'], max_len_history, wedgeResponse['myPosition'])
+      send(('CatchUp_Request', catchup_object), to=replica_sequence[ catchup_object['myPosition'] ])
+      output("Sent CatchUp_Request to replica no="+str(wedgeResponse['myPosition'])+".")
+      output(catchup_object)
+
+  def validCatchUp():
+    common_state = catchUpResponses[0]['state']
+    for catchUpResp in catchUpResponses:
+      if not catchUpResp['state'] == common_state:
+        return False
+    output("catchUpResponses validated.!")
+    replica_start_state = common_state
+    return True
+
+  def validCheckPtStat(checkpt_stat):
+    # check signatures and count
+    output("Checkpoint proof validated.")
+    return True
+
+  def sendClientResponses():
+    for client in last_client_result:
+      client_response_obj = {'client_workload': last_client_result[client], 'sender': self }
+      send(('Olympus_Operation_Response', client_response_obj), to=client)
+      output("Sent Olympus_Operation_Response to client.", client_response_obj)
+    output("Responses sent to client.")
+
+  def getCatchUpObj(curr_hist, max_hist, replica_position):
+    hist_to_add = max_hist[len(curr_hist):]
+    hist_to_add = [hist[1] for hist in hist_to_add]
+    obj = {
+      'operations': hist_to_add,
+      'myPosition': replica_position
+    }
+    return obj
+
   # get the failure, given a config and replica position
   def getFailure(config_ID, replica_ID):
     if( not config_ID in failures.keys() ):
@@ -44,8 +197,19 @@ class Node(process):
 
   # start the replicas
   def startReplicas():
+    replicas_required = 2*fault_tolerance_factor + 1
+    x = 0
+    replicas_required = replicas_required - x
+    replica_set = new( Replica.Node, num=replicas_required, at='ReplicaNode' )
+    if x:
+      replica_set2 = new( Replica.Node, num=x, at='ReplicaNode1' )
+      replica_set = replica_set.union(replica_set2)
+
     config_ID += 1  # increase the configID
     replicas_required = 2*fault_tolerance_factor + 1
+    replica_sequence = []
+    sign_keys = []
+    sign_verify_keys = []
 
     for replica_id in set(replica_set):
       signing_key = nacl.signing.SigningKey.generate()
@@ -76,28 +240,67 @@ class Node(process):
           pre = replica_sequence[counter-1]
           post = replica_sequence[counter+1]
       failure = getFailure(config_ID, counter)
-      setup(replica_id, (self, replica_type, pre, post, fault_tolerance_factor, replica_sign_key, sign_verify_keys, replica_timeout_value, client_public_keys, config_ID, counter, replica_sequence, client_seq_no, failure, config) )
+      setup(replica_id, (self, replica_type, pre, post, fault_tolerance_factor, replica_sign_key, sign_verify_keys, replica_timeout_value, client_public_keys, config_ID, counter, replica_sequence, client_seq_no, failure, config, checkpt_interval, replica_start_state) )
       start(replica_id)
       counter += 1
 
     output(str(replicas_required) + " replica(s) started by Olympus.\n\n")
 
-############################################
-#  Received messages handler
-############################################
-  def receive(msg=('GetConfig',), from_=client):
+    for client in clientsWaitingForConfigResponse:
+      sendGetConfigResponse(client)
+    clientsWaitingForConfigResponse = []
+
+  def sendGetConfigResponse(client):
     output("Received GetConfig request from a client.")
-    send(('GetConfig_Response', replica_sequence, sign_verify_keys), to=client)
+    send(('GetConfig_Response', replica_sequence, sign_verify_keys, config_ID), to=client)
     output("Sent GetConfig_Response to client.")
     output("Replica sequence sent = ", replica_sequence)
     output("Public Keys sent = ", sign_verify_keys, "\n\n")
 
+############################################
+#  Received messages handler
+############################################
+  def receive(msg=('GetConfig',), from_=client):
+    if(reconfigInProgress):
+      output("Reconfig in progress.")
+      # add to a queue, if it already does not exists
+      if(client not in clientsWaitingForConfigResponse):
+        clientsWaitingForConfigResponse.append(client)
+      return
+    sendGetConfigResponse(client)
+
   def receive(msg=('Reconfig_Request',), from_=replica_set):
     output("Received Reconfig_Request request from a replica.\n\n")
+    if(reconfigInProgress):
+      output("Reconfig already in progress.")
+      return
     send(('Wedge_Request'), to=replica_sequence)
+    wedgeResponses = []
+    reconfigInProgress = True
 
   def receive(msg=('Reconfig_Request', proof), from_=client):
     output("Received Reconfig_Request request from a client.\n\n")
+    if(reconfigInProgress):
+      output("Reconfig already in progress.")
+      return
     # verify the proof of misbehavior
     send(('Wedge_Request'), to=replica_sequence)
+    wedgeResponses = []
+    reconfigInProgress = True
+
+  def receive(msg=('Wedge_Response', wedgeRespObj), from_=replica_set):
+    output("Received Wedge_Response from replica with configID="+str(wedgeRespObj['config_ID'])+", position="+str(wedgeRespObj['myPosition'])+".")
+    if( reconfigInProgress ):
+      wedgeResponses.append(wedgeRespObj)
+    else:
+      output("Reconfig process is over for this config.!")
+    output("\n\n")
+
+  def receive(msg=('CatchUp_Response', catchup_resp_obj), from_=replica_set):
+    output("Received CatchUp_Response from replica="+str(catchup_resp_obj['myPosition'])+".", catchup_resp_obj)
+    if reconfigInProgress:
+      catchUpResponses.append(catchup_resp_obj)
+      if catchup_resp_obj['myPosition']==max_hist_replica:
+        last_client_result = catchup_resp_obj['last_client_result']
+    # output("\n\n")
 

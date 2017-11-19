@@ -5,7 +5,6 @@ import nacl.encoding
 import nacl.signing
 
 Olympus = import_da('olympus')
-Replica = import_da('replica')
 Client  = import_da('client')
 
 # other configs
@@ -64,21 +63,15 @@ def main():
   # for now we set values here
   client_count            = config['num_client']
   fault_tolerance_factor  = config['t']
-  replicas_required       = 2*fault_tolerance_factor + 1
   client_timeout          = config['client_timeout']
   head_timeout            = config['head_timeout']
   nonhead_timeout         = config['nonhead_timeout']
   failures                = config['failures']
+  checkpt_interval        = config['checkpt_interval']
 
-  x = 0
-  replicas_required = replicas_required - x
   # create new actors on specified nodes
   olympus     = new( Olympus.Node,                        at='OlympusNode' )
   client_set  = new( Client.Node , num=client_count,      at='ClientNode'  )
-  replica_set = new( Replica.Node, num=replicas_required, at='ReplicaNode' )
-  if x:
-    replica_set2 = new( Replica.Node, num=x, at='ReplicaNode1' )
-    replica_set = replica_set.union(replica_set2)
 
   # create keys for client(s) and setup them
   counter = 0
@@ -96,7 +89,7 @@ def main():
     counter += 1
 
   # start olympus
-  setup( olympus, (fault_tolerance_factor, replica_set, head_timeout, nonhead_timeout, client_public_keys, client_seq_no, failures, config) )
+  setup( olympus, (fault_tolerance_factor, head_timeout, nonhead_timeout, client_public_keys, client_seq_no, failures, config, checkpt_interval) )
   start( olympus )
 
   # start client(s)
