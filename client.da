@@ -27,26 +27,34 @@ class Node(process):
     self.waitForResponse = False
     self.waitingForConfigResult = False
     self.config_ID = -1
+    self.myResult = ''
+    self.waitGetConfig = False
 
     self.ignoreTimeout = False # for debugging simplicity
-    self.reconfigAfterOpsFlag = True # for debugging simplicity
+    self.reconfigAfterOpsFlag = False # for debugging simplicity
 
   # main execution flow of the client
   def run():
-    if not replica_sequence:
-      send(('GetConfig',), to=olympus)
-      clientMsg("Sent GetConfig request to olympus.\n\n")
     while(True):
+      # if no replica_sequence get that first
+      if not replica_sequence and not waitGetConfig:
+        send(('GetConfig',), to=olympus)
+        clientMsg("Sent GetConfig request to olympus.\n\n")
+        waitGetConfig = True
+
       # check if any entry in timeout_array has expired
       if(not ignoreTimeout):
         for key, value in timeout.items():
           now = time.time()
           difference = int(now - value['time'])
           difference *= 1000
-          if(difference > client_timeout):      #send to all nodes
+          if(difference > client_timeout):
             # first check if sequence has changed
-            send(('GetConfig',), to=olympus)
-            waitingForConfigResult = True
+            clientMsg("Timeout expired for request=", key)
+            if not waitingForConfigResult:
+              send(('GetConfig',), to=olympus)
+              clientMsg("Sent GetConfig request to olympus.\n\n")
+              waitingForConfigResult = True
             while waitingForConfigResult:
               --response_from_olympus
 
@@ -60,13 +68,13 @@ class Node(process):
               timeout[key]['time'] = time.time()  #reset the timer
             # if sequence has not changed
             else:
+              clientMsg("Config has not changed for replicas.")
               if( value['workload']['retransmit'] == 1 ):
                 clientMsg("Timeout expired for retransmitted request=", key)
                 # workload = timeout[key]['workload']
                 # send(('Operation', workload), to=replica_sequence)
                 # clientMsg("Sent Operation request to all replicas.", workload)
               else:
-                clientMsg("Timeout expired for request=", key)
                 timeout[key]['workload']['retransmit'] = 1
                 workload = timeout[key]['workload']
                 send(('Operation', workload), to=replica_sequence)
@@ -80,7 +88,7 @@ class Node(process):
       # send operation request to replica head
       if replica_sequence and operations_array and (not waitForResponse):
         op = operations_array[0]
-        doWork(op);
+        myResult = doWork(op);
         workload = create_workload_object(op)
         operations_array.pop(0)
         send(('Operation', workload), to=sequence_head)
@@ -94,7 +102,7 @@ class Node(process):
       if (not operations_array):
         if(reconfigAfterOpsFlag):
           proof = {}
-          send(('Reconfig_Request', proof), to=olympus)
+          send(('Reconfig_Request', proof, proof), to=olympus)
           clientMsg("Reconfig_Request sent to Olympus.\n\n")
           reconfigAfterOpsFlag = False
         # break
@@ -174,7 +182,6 @@ class Node(process):
     return nacl.encoding.HexEncoder.encode( getByteForm(string) )
 
   def validateResponse( client_response_object ):
-
     result_hashes = client_response_object['result_proof']
     if( len(result_hashes) != len(replica_sequence) ):
       print("Result hashes count does not match replicas count.")
@@ -277,6 +284,10 @@ class Node(process):
     if(dict):
       output("["+ str(myPosition) + "] - " + str(dict) )
 
+  def resultChecker(result):
+    if result == myResult:
+      clientMsg("Result received is correct, and matches my own copy.")
+
 ############################################
 #  Received messages handler
 ############################################
@@ -290,18 +301,22 @@ class Node(process):
     self.config_ID        = config_ID
     self.sign_verify_keys = sign_verify_keys
     self.waitingForConfigResult = False
+    self.waitGetConfig = False
 
   def receive(msg=('Olympus_Operation_Response', client_response_object), from_=olympus):
     clientMsg("Received Operation_Response from olympus.", client_response_object)
     # no need to validate response from olympus
     clientMsg("Result received for id=", client_response_object['client_workload']['id'])
     clientMsg("Result received=", client_response_object['client_workload']['result'])
+    resultChecker(client_response_object['client_workload']['result'])
 
     # remove entry in timeout
     if( presentInTimeOut(client_response_object) ):
       deleteEntryInTimeOut( client_response_object['client_workload']['id'] )
       clientMsg("Removed from timeout.")
       waitForResponse = False
+
+    replica_sequence = ()
     clientMsg("\n\n")
 
   def receive(msg=('Operation_Response', client_response_object), from_=replica_sequence):
@@ -310,13 +325,18 @@ class Node(process):
     # validate response
     if( not validateResponse(client_response_object) ):
       clientMsg("Validation of response failed.!")
-      proof = getMisbehaviorProof(client_response_object)
-      send(('Reconfig_Request', proof), to=olympus)
-      clientMsg("Sent Reconfig_Request to olympus.", proof)
+      # proof = getMisbehaviorProof(client_response_object)
+      # send(('Reconfig_Request', proof), to=olympus)
+      # clientMsg("Sent Reconfig_Request to olympus.", proof)
+      return
+
+    if not presentInTimeOut(client_response_object):
+      clientMsg("Response already received for this request.\n\n")
       return
 
     clientMsg("Response validated and found correct.")
     clientMsg("Result received for operation=", client_response_object['result'])
+    resultChecker( client_response_object['result'] )
 
     # remove entry in timeout
     if( presentInTimeOut(client_response_object) ):
@@ -324,4 +344,3 @@ class Node(process):
       clientMsg("Removed from timeout.")
       waitForResponse = False
     clientMsg("\n\n")
-

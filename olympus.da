@@ -30,6 +30,8 @@ class Node(process):
     self.catchUpResponses       = []
     self.reconfigInProgress     = False
     self.waitingForCatchUp      = False
+    self.waitingForNewState     = False
+    self.newStateReceived       = False
     self.checkpt_interval       = checkpt_interval
     self.quorum                 = []
     self.max_hist_replica       = 0 # default value
@@ -46,18 +48,25 @@ class Node(process):
 
       # if reconfig in process, then process the quorum
       if reconfigInProgress:
-        if waitingForCatchUp:
-          # verify catchup
-          if len(catchUpResponses)==fault_tolerance_factor+1:
-            if not validCatchUp():
-              waitingForCatchUp = False
-              continue
+        if waitingForNewState:
+          if not newStateReceived:
+            continue
+          else:
             sendClientResponses()
             send(('Suicide'), to=replica_sequence)
             # sleep for some time, for clarity in logs
             time.sleep( sleepTimeBeforeNewSequence )
             startReplicas()
             reconfigInProgress = False
+        elif waitingForCatchUp:
+          # verify catchup
+          if len(catchUpResponses)==fault_tolerance_factor+1:
+            if not validCatchUp():
+              waitingForCatchUp = False
+              continue
+            getNewState()
+            waitingForNewState = True
+            continue
         else:
           if len(wedgeResponses) > fault_tolerance_factor:
             output("Have enough wedgeResponses to create a Quorum.")
@@ -100,6 +109,7 @@ class Node(process):
         return False
       trucateReceivedHistory(highest_checkpt_no)
 
+    removeCheckPtsInHistory()
     if not validateQuorumHistory():
       return False
 
@@ -117,6 +127,8 @@ class Node(process):
         else:
           break
       wedgeResponse['history'] = wedgeResponse['history'][index:]
+
+  def removeCheckPtsInHistory():
     output("Removing all checkpoints in remaining history.")
     for wedgeResponse in quorum:
       wedgeResponse['history'][:] = [value for value in wedgeResponse['history'] if len(value)==2]
@@ -159,13 +171,17 @@ class Node(process):
       output(catchup_object)
 
   def validCatchUp():
-    common_state = catchUpResponses[0]['state']
+    common_state = catchUpResponses[0]['state_encrypted']
     for catchUpResp in catchUpResponses:
-      if not catchUpResp['state'] == common_state:
+      if not catchUpResp['state_encrypted'] == common_state:
         return False
     output("catchUpResponses validated.!")
-    replica_start_state = common_state
     return True
+
+  def getNewState():
+    newStateReceived = False
+    send(('Get_State'), to=self.replica_sequence[ wedgeResponses[0]['myPosition'] ])
+    output("Sent Get_State request to one replica in the quorum.")
 
   def validCheckPtStat(checkpt_stat):
     # check signatures and count
@@ -270,16 +286,22 @@ class Node(process):
       return
     sendGetConfigResponse(client)
 
-  def receive(msg=('Reconfig_Request',), from_=replica_set):
+  def receive(msg=('Reconfig_Request', received_config_ID), from_=replica_sequence):
     output("Received Reconfig_Request request from a replica.\n\n")
+    if not received_config_ID == self.config_ID:
+      output("Old replica sequecne cannot start a reconfig.")
+      return
     if(reconfigInProgress):
       output("Reconfig already in progress.")
       return
-    send(('Wedge_Request'), to=replica_sequence)
+    send(('Wedge_Request'), to=self.replica_sequence)
+    output("Sent Wedge_Request to all replicas in current sequence")
     wedgeResponses = []
     reconfigInProgress = True
+    waitingForCatchUp = False
+    waitingForNewState = False
 
-  def receive(msg=('Reconfig_Request', proof), from_=client):
+  def receive(msg=('Reconfig_Request', proof, dummy), from_=client):
     output("Received Reconfig_Request request from a client.\n\n")
     if(reconfigInProgress):
       output("Reconfig already in progress.")
@@ -288,8 +310,10 @@ class Node(process):
     send(('Wedge_Request'), to=replica_sequence)
     wedgeResponses = []
     reconfigInProgress = True
+    waitingForCatchUp = False
+    waitingForNewState = False
 
-  def receive(msg=('Wedge_Response', wedgeRespObj), from_=replica_set):
+  def receive(msg=('Wedge_Response', wedgeRespObj), from_=replica_sequence):
     output("Received Wedge_Response from replica with configID="+str(wedgeRespObj['config_ID'])+", position="+str(wedgeRespObj['myPosition'])+".")
     if( reconfigInProgress ):
       wedgeResponses.append(wedgeRespObj)
@@ -297,7 +321,7 @@ class Node(process):
       output("Reconfig process is over for this config.!")
     output("\n\n")
 
-  def receive(msg=('CatchUp_Response', catchup_resp_obj), from_=replica_set):
+  def receive(msg=('CatchUp_Response', catchup_resp_obj), from_=replica_sequence):
     output("Received CatchUp_Response from replica="+str(catchup_resp_obj['myPosition'])+".", catchup_resp_obj)
     if reconfigInProgress:
       catchUpResponses.append(catchup_resp_obj)
@@ -305,3 +329,8 @@ class Node(process):
         last_client_result = catchup_resp_obj['last_client_result']
     # output("\n\n")
 
+  def receive(msg=('Get_State_Response', new_state), from_=replica_sequence):
+    output("Received Get_State_Response from replica.", new_state)
+    if reconfigInProgress:
+      self.replica_start_state = new_state
+      newStateReceived = True

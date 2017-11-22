@@ -1,6 +1,7 @@
 import os
 import re
 import time
+import json
 import pickle
 import logging
 import nacl.encoding
@@ -39,10 +40,19 @@ class Node(process):
     self.changeOpFlag = False
     self.changeResultFlag = False
     self.dropResStmtFlag = False
+    self.crashFlag = False
+    self.silent = False
+    self.ignoreThisMsg = False
+    self.invalidOrderSigFlag = False
+    self.invalidResultSigFlag = False
+    self.dropCheckptStmtFlag = False
+    self.truncateHistFlag = False
+    self.truncateHistVal = 0
     self.tempObjDict = {}
     self.result_cache = {}
     self.response_cache = {}
     self.slot = 0
+    self.reverse_slot = 0
     self.checkpt_no = 0
     self.timeout = {}
     self.latest_checkpt_proof = []
@@ -51,15 +61,24 @@ class Node(process):
       'client_request': {},
       'forwarded_request': {},
       'shuttle': {},
-      'result_shuttle': {}
+      'result_shuttle': {},
+      'wedge_request': -1,
+      'checkpoint': -1,
+      'completed_checkpoint': -1,
+      'get_running_state': -1,
+      'catch_up': -1
     }
     replicaMsg("i am alive.! :D")
     replicaMsg("objDict at start=", objDict)
+    replicaMsg("failure triggers=",failure_map)
 
   # main execution flow of the client
   def run():
-
     while(True):
+      if crashFlag:
+        if not silent:
+          replicaMsg("[Error Injection] Crash Flag is true. Dying now.!")
+        break
 
       # messages from olympus get higher priority
       --olympus_to_replica
@@ -70,11 +89,14 @@ class Node(process):
       if( workableState() ):
         for key, value in timeout.items():
           now = time.time()
-          difference = int(now - value)
+          difference = now - value['time']
+          difference *= 1000
           if(difference > replica_timeout_value):
-            replicaMsg("TimeOut expired for a request.")
-            send(('Reconfig_Request'), to=olympus)
-            replicaMsg("Sent Reconfig_Request to olympus.")
+            if not value['reconfig_raised']:
+              replicaMsg("TimeOut expired for a request.")
+              sendReconfigToOlympus()
+              value['reconfig_raised'] = True
+    logging.shutdown()
 
 
 ############################################
@@ -92,8 +114,9 @@ class Node(process):
     replicaMsg("Client request signature verified and correct.")
 
     # check if workload is a retransmission
-    if( workload['retransmit'] ):
-      replicaMsg("Client request is a retransmit request.")
+    # if( workload['retransmit'] ):
+    if( True ):
+      # replicaMsg("Client request is a retransmit request.")
       # first check with workload id if this request is in cache
       if inCache(workload) or inResultCache(workload):
         # can reply to client directly
@@ -106,9 +129,11 @@ class Node(process):
         # still waiting to receive the result shuttle
         if( inResultCache(workload) ):
           # add request to timeout DS
-          addToTimeOut( workload )
+          addToTimeOut( workload , sendClientResponse=True)
           return
-    else:
+    # else:
+    # if control has reached till here it is a new request
+    if(True):
       replicaMsg("Client request is a new request.")
       if(myReplicaType=="HEAD"):
         result = doWork(workload['operation'])
@@ -124,6 +149,7 @@ class Node(process):
           send(('Operation_Response', client_response_object), to=client_response_object['client_workload']['requester'])
           replicaMsg("Sent Operation_Response to client.", client_response_object)
         else:
+          addToTimeOut( workload )
           send(('Shuttle', shuttle_object), to=post)
           replicaMsg("Sent Shuttle to next node.", shuttle_object)
           # send checkpoint proof
@@ -134,6 +160,7 @@ class Node(process):
             replicaMsg("Sent CheckPoint to next node.", checkpt_object)
       else:
         send(('Forwarded_Operation', encrypted_workload), to=replica_sequence[0])
+        addToTimeOut( workload )
         replicaMsg("Client new request received on a non-head replica. Forwarding request to head.", encrypted_workload)
 
   def doWork(work):
@@ -297,8 +324,25 @@ class Node(process):
       'operation': operation,
       'result_hash': cryptoEncode(result)
     }
-    shuttle_object['order_proof']['order_statements'].append( getSigned( pickle.dumps(my_order_statement) ) )
-    shuttle_object['result_proof']['result_hashes'].append( getSigned( pickle.dumps(my_result_hash) ) )
+
+    signedOrderStat = getSigned( pickle.dumps(my_order_statement) )
+    if invalidOrderSigFlag:
+      replicaMsg("[Error Injection] Change first byte of signed order statement.!")
+      signedlist = list(signedOrderStat)
+      signedlist[0] = (signedlist[0] + 1) % 256
+      signedOrderStat = bytes(signedlist)
+      invalidOrderSigFlag = False
+
+    signedResultStat = getSigned( pickle.dumps(my_result_hash) )
+    if invalidResultSigFlag and myReplicaType!="TAIL":
+      replicaMsg("[Error Injection] Change first byte of signed order statement.!")
+      signedlist = list(signedResultStat)
+      signedlist[0] = (signedlist[0] + 1) % 256
+      signedResultStat = bytes(signedlist)
+      invalidResultSigFlag = False
+
+    shuttle_object['order_proof']['order_statements'].append( signedOrderStat )
+    shuttle_object['result_proof']['result_hashes'].append( signedResultStat )
 
     # inject failure of drop result statement of head
     if(dropResStmtFlag and myReplicaType=='TAIL'):
@@ -309,9 +353,13 @@ class Node(process):
 
   def validateShuttleObject( shuttle_object, shuttle_type='forward'):
 
+    # 1. look for slot holes
     if(shuttle_type == 'forward'):
-      # 1. look for slot holes
       if( shuttle_object['slot'] != slot+1 ):
+        print("Found hole in slot.")
+        return False
+    else:
+      if( shuttle_object['slot'] != reverse_slot+1 ):
         print("Found hole in slot.")
         return False
 
@@ -362,6 +410,8 @@ class Node(process):
     # do necessary operations
     if(shuttle_type == 'forward'):
       slot += 1
+    else:
+      reverse_slot += 1
 
     return True
 
@@ -435,6 +485,13 @@ class Node(process):
       'result': result,
       'result_proof': shuttle_object['result_proof']['result_hashes']
     }
+    if invalidResultSigFlag and myReplicaType=="TAIL":
+      replicaMsg("[Error Injection] Change first byte of signed order statement.!")
+      signedlist = list(client_response_object['result_proof'][-1])
+      signedlist[0] = (signedlist[0] + 1) % 256
+      client_response_object['result_proof'][-1] = bytes(signedlist)
+      invalidResultSigFlag = False
+
     return client_response_object
 
   def create_reverse_shuttle_object( shuttle_object ):
@@ -460,13 +517,21 @@ class Node(process):
   def getCache( workload ):
     return response_cache[ workload['id'] ]
 
-  def addToTimeOut( workload ):
-    timeout[ workload['id'] ] = time.time()
+  def addToTimeOut( workload , sendClientResponse=False):
+    timeout[ workload['id'] ] = {
+      'time': time.time(),
+      'sendClientResponse': sendClientResponse,
+      'reconfig_raised': False
+    }
 
   def presentInTimeOut( reverse_shuttle_object ):
     return reverse_shuttle_object['client_workload']['id'] in timeout
 
+  def revShuttleClientResponseNeeded( reverse_shuttle_object ):
+    return timeout[reverse_shuttle_object['client_workload']['id']]['sendClientResponse']
+
   def deleteEntryInTimeOut( workload_id ):
+    replicaMsg("Deleted '"+workload_id+"' from timeout.")
     del timeout[ workload_id ]
 
   def parseFailures( failures ):
@@ -474,7 +539,12 @@ class Node(process):
       'client_request': {},
       'forwarded_request': {},
       'shuttle': {},
-      'result_shuttle': {}
+      'result_shuttle': {},
+      'wedge_request': {},
+      'checkpoint': {},
+      'completed_checkpoint': {},
+      'get_running_state': {},
+      'catch_up': {},
     }
 
     if(not failures):
@@ -482,41 +552,92 @@ class Node(process):
 
     split_arr = failures.split(';')
     for failure in split_arr:
-      matchObj = re.match( r'\s*(client_request|forwarded_request|shuttle|result_shuttle)\(([^,]*),([^\)]*)\),([^\()]*)\(\)\s*', failure)
-      log_type = matchObj.group(1)
-      client_ID = int( matchObj.group(2) )
-      message_count = int( matchObj.group(3) )
-      trigger_type = matchObj.group(4)
-      if( client_ID in failure_map[log_type].keys() ):
-        failure_map[log_type][client_ID][message_count] = trigger_type
+      if failure.count(',') > 1:
+        matchObj = re.match( r'\s*(client_request|forwarded_request|shuttle|result_shuttle)\(([^,]*),([^\)]*)\),([^\()]*)\((.*)\)\s*', failure)
+        log_type = matchObj.group(1)
+        client_ID = int( matchObj.group(2) )
+        message_count = int( matchObj.group(3) )
+        trigger_type = matchObj.group(4)
+        if( matchObj.group(5) ):
+          trigger_type += ':' + matchObj.group(5)
+        if( client_ID in failure_map[log_type].keys() ):
+          if( message_count in failure_map[log_type][client_ID].keys() ):
+            failure_map[log_type][client_ID][message_count].append( trigger_type )
+          else:
+            failure_map[log_type][client_ID][message_count] = [ trigger_type ]
+        else:
+          failure_map[log_type][client_ID] = {message_count: [trigger_type] }
       else:
-        failure_map[log_type][client_ID] = {message_count: trigger_type}
+        matchObj = re.match( r'\s*(wedge_request|checkpoint|completed_checkpoint|get_running_state|catch_up)\(([^\)]*)\),([^\()]*)\((.*)\)\s*', failure)
+        log_type = matchObj.group(1)
+        message_count = int( matchObj.group(2) )
+        trigger_type = matchObj.group(3)
+        if( matchObj.group(4) ):
+          trigger_type += ':' + matchObj.group(4)
+        if( message_count in failure_map[log_type].keys() ):
+          failure_map[log_type][message_count].append( trigger_type )
+        else:
+          failure_map[log_type] = {message_count: [trigger_type] }
 
     return failure_map
 
-  def incrementCountLog(log_type, client_name):
-    client_ID = client_seq_no[client_name]
-    if( client_ID in count_log[log_type].keys() ):
-      count_log[log_type][client_ID] += 1
+  def incrementCountLog(log_type, client_name=False):
+    if client_name:
+      client_ID = client_seq_no[client_name]
+      if( client_ID in count_log[log_type].keys() ):
+        count_log[log_type][client_ID] += 1
+      else:
+        count_log[log_type][client_ID] = 1
+      replicaMsg("Log count for '"+ log_type + "', client=" + str(client_ID) + ",count="+str(count_log[log_type][client_ID]))
+      # check if now any failure flag needs to be set
+      setFailureFlag(log_type, count_log[log_type][client_ID], client_passed=True, client_ID=client_ID)
     else:
-      count_log[log_type][client_ID] = 1
-    replicaMsg("Log count for '"+ log_type + "', client=" + str(client_ID) + ",count="+str(count_log[log_type][client_ID]))
-    # check if now any failure flag needs to be set
-    setFailureFlag(log_type, client_ID, count_log[log_type][client_ID])
+      count_log[log_type] += 1
+      replicaMsg("Log for '"+ log_type + "', count="+str(count_log[log_type]))
+      setFailureFlag(log_type, count_log[log_type], client_passed=False)
 
-  def setFailureFlag(log_type, client_ID, message_count):
+  def setFailureFlag(log_type, message_count, client_passed, client_ID=False):
     try:
-      trigger_type = failure_map[log_type][client_ID][message_count]
-      replicaMsg("[Fault Injection] Condition matched for '"+log_type+"', client="+str(client_ID)+", message="+str(message_count)+".!")
+      if client_passed:
+        trigger_types = failure_map[log_type][client_ID][message_count]
+        replicaMsg("[Fault Injection] Condition matched for '"+log_type+"', client="+str(client_ID)+", message="+str(message_count)+".!")
+      else:
+        trigger_types = failure_map[log_type][message_count]
+        replicaMsg("[Fault Injection] Condition matched for '"+log_type+", message="+str(message_count)+".!")
     except KeyError:
       return
-    trigger_type.strip()
-    if(trigger_type == 'change_operation'):
-      changeOpFlag = True
-    if(trigger_type == 'change_result'):
-      changeResultFlag = True
-    if(trigger_type == 'drop_result_stmt'):
-      dropResStmtFlag = True
+    for trigger_type in trigger_types:
+      trigger_type.strip()
+      if(trigger_type == 'change_operation'):
+        changeOpFlag = True
+      if(trigger_type == 'change_result'):
+        changeResultFlag = True
+      if(trigger_type == 'drop_result_stmt'):
+        dropResStmtFlag = True
+      if(trigger_type == 'crash'):
+        crashFlag = True
+      if(trigger_type == 'drop'):
+        ignoreThisMsg = True
+      if(trigger_type == 'increment_slot'):
+        if myReplicaType=='HEAD':
+          replicaMsg("[Error Injection] Slot incremented for HEAD node.!")
+          slot += 1
+      if(trigger_type == 'extra_op'):
+        replicaMsg("[Error Injection] Performing extra op for the node.!")
+        doWork("put('a','a')")
+      if(trigger_type == 'invalid_order_sig'):
+        invalidOrderSigFlag = True
+      if(trigger_type == 'invalid_result_sig'):
+        invalidResultSigFlag = True
+      if(trigger_type == 'drop_checkpt_stmts'):
+        dropCheckptStmtFlag = True
+      if('truncate_history' in trigger_type): # check substring
+        action, value = trigger_type.split(':')
+        truncateHistFlag = True
+        truncateHistVal = value
+      if('sleep' in trigger_type):            # check substring
+        action, value = trigger_type.split(':')
+        time.sleep( int(value) )
 
   def replicaMsg(heading, dict={}, msg_type='action'):
     if(msg_type=='imp'):
@@ -561,6 +682,11 @@ class Node(process):
       'lastest_checkpt': lastest_checkpt,
       'latest_checkpt_proof': latest_checkpt_proof
     }
+    if truncateHistFlag and truncateHistVal>0:
+      replicaMsg("[Error Injection] History truncated for wedge response.!")
+      obj['history'] = obj['history'][:-truncateHistVal]
+      truncateHistFlag =  False
+      truncateHistVal = 0
     return obj
 
   def updateHistoryForCheckPoint(checkpt_object):
@@ -575,6 +701,17 @@ class Node(process):
     lastest_checkpt = checkpt_object['checkpt_no']
     replicaMsg("History before checkpt_no="+str(checkpt_object['checkpt_no'])+" deleted.!")
 
+  def ignoreMsg():
+    if ignoreThisMsg:
+      replicaMsg("[Error Injection] Drop Message Flag is true.!")
+      ignoreThisMsg = False
+      return True
+    return False
+
+  def sendReconfigToOlympus():
+    send(('Reconfig_Request', config_ID), to=olympus)
+    replicaMsg("Sent Reconfig_Request to olympus.\n\n")
+
 ############################################
 #  Received messages handler
 ############################################
@@ -586,6 +723,9 @@ class Node(process):
       return
 
     incrementCountLog('client_request', client)   # log message received from this client
+    if ignoreMsg():
+      return
+
     handleWorkload( encrypted_workload )          # do the workload
     replicaMsg("\n\n")
 
@@ -597,6 +737,9 @@ class Node(process):
       return
 
     incrementCountLog('forwarded_request', encrypted_workload['requester'])   # log message received from this client
+    if ignoreMsg():
+      return
+
     handleWorkload( encrypted_workload )                                      # do the workload
     replicaMsg("\n\n")
 
@@ -605,6 +748,9 @@ class Node(process):
     # replicaMsg("Received Shuttle slot="+str(shuttle_object['slot'])+". Shuttle_Object=", shuttle_object, msg_type='imp')
     replicaMsg("Received Shuttle slot="+str(shuttle_object['slot'])+".", shuttle_object, msg_type='imp')
     incrementCountLog('shuttle', shuttle_object['client_workload']['requester'] )   # log the shuttle message received for this client
+    if ignoreMsg():
+      return
+
     if ( not workableState() ):
       replicaMsg("Not in OK state.!")
       return
@@ -614,8 +760,7 @@ class Node(process):
     # validate shuttle first
     if( not validateShuttleObject(shuttle_object) ):
       replicaMsg("Validation failed for shuttle_object.!")
-      send(('Reconfig_Request'), to=olympus)
-      replicaMsg("Sent Reconfig_Request to olympus.\n\n")
+      sendReconfigToOlympus()
       return
     replicaMsg("Validation success for shuttle_object.")
 
@@ -658,6 +803,9 @@ class Node(process):
   def receive( msg=('Reverse_Shuttle', reverse_shuttle_object), from_=replica_set ):
     replicaMsg("Received Reverse_Shuttle slot="+str(reverse_shuttle_object['slot'])+".", reverse_shuttle_object, msg_type='imp')
     incrementCountLog('result_shuttle', reverse_shuttle_object['client_workload']['requester'] )    # log the shuttle message received for this client
+    if ignoreMsg():
+      return
+
     if ( not workableState() ):
       replicaMsg("Not in OK state.!")
       return
@@ -665,8 +813,7 @@ class Node(process):
     # validate shuttle first
     if( not validateShuttleObject(reverse_shuttle_object, shuttle_type='reverse') ):
       replicaMsg("Validation failed for shuttle_object.!")
-      send(('Reconfig_Request'), to=olympus)
-      replicaMsg("Sent Reconfig_Request to olympus.")
+      sendReconfigToOlympus()
       return
     replicaMsg("Validation success for shuttle_object.")
 
@@ -674,10 +821,11 @@ class Node(process):
 
     # also check if this operation is in timeout handler array
     if( presentInTimeOut(reverse_shuttle_object) ):
-      replicaMsg("Client request found in timeout for this reverse shuttle.")
-      client_response_object = getCache( reverse_shuttle_object['client_workload'] )
-      send(('Operation_Response', client_response_object), to=client_response_object['client_workload']['requester'])
-      replicaMsg("Sent retransmitted Operation_Response to client.", client_response_object)
+      if revShuttleClientResponseNeeded(reverse_shuttle_object):
+        replicaMsg("Client request found in timeout for this reverse shuttle.")
+        client_response_object = getCache( reverse_shuttle_object['client_workload'] )
+        send(('Operation_Response', client_response_object), to=client_response_object['client_workload']['requester'])
+        replicaMsg("Sent retransmitted Operation_Response to client.", client_response_object)
       deleteEntryInTimeOut( reverse_shuttle_object['client_workload']['id'] )
 
     # forward to previous replica, if not head
@@ -690,6 +838,10 @@ class Node(process):
   # handle checkpoint messages from other replicas
   def receive( msg=('CheckPoint', checkpt_object), from_=replica_set ):
     replicaMsg("Received CheckPoint="+str(checkpt_object['checkpt_no'])+".", checkpt_object, msg_type='imp')
+    incrementCountLog('checkpoint')
+    if ignoreMsg():
+      return
+
     if ( not workableState() ):
       replicaMsg("Not in OK state.!")
       return
@@ -697,8 +849,7 @@ class Node(process):
     # validate shuttle first
     if( not validateCheckPtObject(checkpt_object) ):
       replicaMsg("Valid`t.!")
-      send(('Reconfig_Request'), to=olympus)
-      replicaMsg("Sent Reconfig_Request to olympus.\n\n")
+      sendReconfigToOlympus()
       return
     replicaMsg("Validation success for checkpt_object.")
 
@@ -721,6 +872,10 @@ class Node(process):
   # handle reverse checkpoint messages from other replicas
   def receive( msg=('Reverse_CheckPoint', checkpt_object), from_=replica_set ):
     replicaMsg("Received Reverse_CheckPoint slot="+str(checkpt_object['checkpt_no'])+".", checkpt_object, msg_type='imp')
+    incrementCountLog('completed_checkpoint')
+    if ignoreMsg():
+      return
+
     if ( not workableState() ):
       replicaMsg("Not in OK state.!")
       return
@@ -728,8 +883,7 @@ class Node(process):
     # validate shuttle first
     if( not validateCheckPtObject(checkpt_object, checkpt_type='reverse') ):
       replicaMsg("Validation failed for checkpt_object.!")
-      send(('Reconfig_Request'), to=olympus)
-      replicaMsg("Sent Reconfig_Request to olympus.")
+      sendReconfigToOlympus()
       return
     replicaMsg("Validation success for checkpt_object.")
 
@@ -737,22 +891,34 @@ class Node(process):
 
     # forward to previous replica, if not head
     if( myReplicaType!='HEAD' and pre ):
-      # reverse_shuttle_object = makeChangesToReverseShuttle( reverse_shuttle_object )
+      if dropCheckptStmtFlag:
+        replicaMsg("[Error Injection] CheckPoint statements for first t+1 replicas dropped.!")
+        checkpt_object['checkpt_statements'] = checkpt_object['checkpt_statements'][fault_tolerance_factor+1:]
+        dropCheckptStmtFlag = False
       send(('Reverse_CheckPoint', checkpt_object), to=pre)
-      replicaMsg("Sent Reverse_CheckPoint to previous replica.", reverse_shuttle_object)
+      replicaMsg("Sent Reverse_CheckPoint to previous replica.", checkpt_object)
     replicaMsg("\n\n")
 
   # handle requests from olympus
   def receive( msg=('Wedge_Request'), from_=olympus ):
-    replicaMsg("Received Wedge_Request request olympus.", msg_type='imp')
+    replicaMsg("Received Wedge_Request from olympus.", msg_type='imp')
+    incrementCountLog('wedge_request')
+    if ignoreMsg():
+      return
+
     state = 'IMMUTABLE'
     wedgeRespObj = createWedgeResponseObject()
     send(('Wedge_Response', wedgeRespObj), to=olympus)
     replicaMsg("Sent Wedge_Response to olympus.", msg_type='imp')
+    replicaMsg("\n\n")
 
   # handle catch up request
   def receive( msg=('CatchUp_Request', catchup_object), from_=olympus ):
     replicaMsg("Received CatchUp_Request from olympus.", catchup_object, msg_type='imp')
+    incrementCountLog('catch_up')
+    if ignoreMsg():
+      return
+
     if ( workableState() ):
       replicaMsg("Cannot do CatchUp_Request in OK state.!")
       return
@@ -762,14 +928,31 @@ class Node(process):
     for operation in operations:
       doTempWork(operation)
 
-    catchup_object['state'] = tempObjDict
+    catchup_object['state_encrypted'] = cryptoEncode( json.dumps(tempObjDict) )
     catchup_object['last_client_result'] = last_client_result
     send(('CatchUp_Response', catchup_object), to=olympus)
     replicaMsg("Sent CatchUp_Response to olympus.", catchup_object)
-    output("\n\n\n")
+    output("\n\n")
+
+  # handle get state request
+  def receive( msg=('Get_State'), from_=olympus ):
+    replicaMsg("Received Get_State from olympus.", msg_type='imp')
+    incrementCountLog('get_running_state')
+    if ignoreMsg():
+      return
+
+    if ( workableState() ):
+      replicaMsg("Cannot do Get_State in OK state.!")
+      return
+
+    send(('Get_State_Response', tempObjDict), to=olympus)
+    replicaMsg("Sent Get_State_Response to olympus.", tempObjDict)
+    output("\n\n")
 
   # handle message to die
   def receive( msg=('Suicide'), from_=olympus ):
     replicaMsg("Olympus asked me to die. :/ ", msg_type='imp')
+    crashFlag = True
+    silent = True
     logging.shutdown()
     # os._exit(-1)
