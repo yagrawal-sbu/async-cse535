@@ -150,3 +150,9 @@ NOTE:	If config file name is config/<config_name>.txt, log files are named as fo
 	OTHER 		:	Running with 3 clients and t=2 for integrity.
 	OUTCOME 	:	PASS
 
+--------------------------------------------------------------------------------------------------
+25.	DESCRIPTION	:	On 'new_configuration(0)' trigger, inject error 'sleep(1)'
+	CONFIGFILES	:	new_config_condition_sleep_failure_t1_c1.txt
+	OTHER 		:	Running with 3 clients and t=2 for integrity.
+	OUTCOME 	:	PASS
+

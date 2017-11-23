@@ -74,6 +74,8 @@ class Node(process):
 
   # main execution flow of the client
   def run():
+    if failure_map['new_configuration']:
+      setFailureFlag('new_configuration', 0, client_passed=False)
     while(True):
       if crashFlag:
         if not silent:
@@ -556,6 +558,7 @@ class Node(process):
       'completed_checkpoint': {},
       'get_running_state': {},
       'catch_up': {},
+      'new_configuration': {}
     }
 
     if(not failures_arr):
@@ -580,7 +583,7 @@ class Node(process):
           else:
             failure_map[log_type][client_ID] = {message_count: [trigger_type] }
         else:
-          matchObj = re.match( r'\s*(wedge_request|checkpoint|completed_checkpoint|get_running_state|catch_up)\(([^\)]*)\),([^\()]*)\((.*)\)\s*', failure)
+          matchObj = re.match( r'\s*(wedge_request|checkpoint|completed_checkpoint|get_running_state|catch_up|new_configuration)\(([^\)]*)\),([^\()]*)\((.*)\)\s*', failure)
           log_type = matchObj.group(1)
           message_count = int( matchObj.group(2) )
           trigger_type = matchObj.group(3)
