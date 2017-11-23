@@ -15,7 +15,8 @@ config( channel = {'fifo', 'reliable'} )
 # returns a dictionary of configs
 def parseConfigFile( configFilePath ):
   config = {
-    'failures': {}
+    'failures': {},
+    'checkpt_interval': 10 # default value
   }
   config_file_handle = open(configFilePath, "r")
   lines = config_file_handle.readlines()

@@ -284,6 +284,7 @@ class Node(process):
 
   def create_checkpt_obj():
     checkpt_no += 1
+    replicaMsg("\n\n")
     replicaMsg("New checkpoint object created with checkpt_no="+str(checkpt_no))
     obj = {
       'checkpt_no': checkpt_no,
@@ -420,7 +421,7 @@ class Node(process):
     if(checkpt_type == 'forward'):
       # 1. look for slot holes
       if( checkpt_object['checkpt_no'] != checkpt_no+1 ):
-        print("Found hole in checkpoint slot.")
+        replicaMsg("Found hole in checkpoint slot.")
         return False
       if(slot%checkpt_interval!=0):
         replicaMsg("Should not be receiving checkpoint message now.!")
@@ -428,7 +429,7 @@ class Node(process):
 
     # 2. validate size of both proofs same or not
     if( len(checkpt_object['history_len']) != len(checkpt_object['checkpt_statements']) ):
-      print("Size of history_len and checkpt_statements arrays do not match.")
+      replicaMsg("Size of history_len and checkpt_statements arrays do not match.")
       return False
 
     # 3. validate signature and then contents
@@ -441,18 +442,18 @@ class Node(process):
       try:
         decrypted_checkpt_stat = public_key.verify( checkpt_statements[counter] )
       except nacl.exceptions.BadSignatureError:
-        print("Signature of replica '"+str(counter)+"'' did not match.")
+        replicaMsg("Signature of replica '"+str(counter)+"'' did not match.")
         return False
 
       # validate with my own picke of myDict
       if(checkpt_type == 'forward'):
         if(myObjPickle!=decrypted_checkpt_stat):
-          print("State of replica '"+str(counter)+"'' did not match.")
+          replicaMsg("State of replica '"+str(counter)+"'' did not match.")
           return False
         # 2. check if my history len is same as previous replicas
-        if( history_lens[counter] != len(history) ):
-          print("Found hole in history length.")
-          return False
+        # if( history_lens[counter] != len(history) ):
+        #   replicaMsg("Found hole in history length.")
+        #   return False
 
     # if control reaches here, means valid shuttle
     # do necessary operations
@@ -518,11 +519,17 @@ class Node(process):
     return response_cache[ workload['id'] ]
 
   def addToTimeOut( workload , sendClientResponse=False):
-    timeout[ workload['id'] ] = {
-      'time': time.time(),
-      'sendClientResponse': sendClientResponse,
-      'reconfig_raised': False
-    }
+    if not workload['id'] in timeout.keys():
+      timeout[ workload['id'] ] = {
+        'time': time.time(),
+        'sendClientResponse': sendClientResponse,
+        'reconfig_raised': False
+      }
+      replicaMsg("Request added to timeout.")
+    else:
+      timeout[workload['id']]['sendClientResponse'] = True
+      replicaMsg("Request already in timeout.")
+
 
   def presentInTimeOut( reverse_shuttle_object ):
     return reverse_shuttle_object['client_workload']['id'] in timeout
@@ -848,7 +855,7 @@ class Node(process):
 
     # validate shuttle first
     if( not validateCheckPtObject(checkpt_object) ):
-      replicaMsg("Valid`t.!")
+      replicaMsg("Validation failed for checkpt_object.!")
       sendReconfigToOlympus()
       return
     replicaMsg("Validation success for checkpt_object.")

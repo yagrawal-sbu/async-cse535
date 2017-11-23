@@ -44,9 +44,10 @@ class Node(process):
 
       # check if any entry in timeout_array has expired
       if(not ignoreTimeout):
-        for key, value in timeout.items():
+        keys = list(timeout)
+        for key in keys:
           now = time.time()
-          difference = int(now - value['time'])
+          difference = int(now - timeout[key]['time'])
           difference *= 1000
           if(difference > client_timeout):
             # first check if sequence has changed
@@ -58,8 +59,12 @@ class Node(process):
             while waitingForConfigResult:
               --response_from_olympus
 
+            # check if response already received by then
+            if key not in list(timeout):
+              continue
+
             # if sequence has changed
-            if not value['config_ID']==config_ID:
+            if not timeout[key]['config_ID']==config_ID:
               clientMsg("Config has changed for replicas.")
               timeout[key]['workload']['retransmit'] = 0
               workload = timeout[key]['workload']
@@ -69,8 +74,8 @@ class Node(process):
             # if sequence has not changed
             else:
               clientMsg("Config has not changed for replicas.")
-              if( value['workload']['retransmit'] == 1 ):
-                clientMsg("Timeout expired for retransmitted request=", key)
+              if( timeout[key]['workload']['retransmit'] == 1 ):
+                clientMsg("Timeout expired for Retransmitted request=", key)
                 # workload = timeout[key]['workload']
                 # send(('Operation', workload), to=replica_sequence)
                 # clientMsg("Sent Operation request to all replicas.", workload)
