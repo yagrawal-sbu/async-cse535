@@ -96,6 +96,6 @@ Remaining 400 functionalities interleaved with the algorithm.
 - number of quantifications: 0
 
 # PERFORMANCE EVALUATION
-1. with Raft  - 7.34 secs
-2. peform900.txt with single host - 13.3 secs
-3. peform900.txt with multi host - 15.7 secs
+1. with Raft  - 20.77 secs
+2. peform900.txt with single host - 44.3 secs
+3. peform900.txt with multi host - 52.7 secs
