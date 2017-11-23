@@ -58,6 +58,7 @@ There is no automated way to verify the final state of the replicas, after runni
 However this limitation can be overcome by designing test cases where sequencing of the clients' operations is not a factor of the final state of the replica and then can be verified from the logs directly.
 One simple way to implement this is by using unique and distinct 'key' for all operations from a client.
 For example, client C1 will always send operations for key 'hello' while another client C2 will always send operations for the key 'world'.
+
 Note - The above limitation has now been taken care by verifying the response at the client. Client maintains its own dictionary of operations.
 
 
@@ -65,7 +66,7 @@ Note - The above limitation has now been taken care by verifying the response at
 Phase 2 - Yogesh Agrawal completed the parts of code in replica, olympus and bcr.da, logging and partially in testing and documentation.
 Fan Wang completed the parts of code in client, multi-host setup and partially in  testing and documentation.
 
-Phase 3 - Yogesh Agrawal completed the parts of code in cleint, replica and bcr.da, logging and partially in testing and documentation.
+Phase 3 - Yogesh Agrawal completed the parts of code in client, replica and bcr.da, logging and partially in testing and documentation.
 Fan Wang completed the parts of code in olympus, performance evaluation and partially in  testing and documentation.
 
 ## MAIN FILES
@@ -95,6 +96,6 @@ Remaining 400 functionalities interleaved with the algorithm.
 - number of quantifications: 0
 
 # PERFORMANCE EVALUATION
-1. with Raft  - 4.2 secs
+1. with Raft  - 7.34 secs
 2. peform900.txt with single host - 13.3 secs
 3. peform900.txt with multi host - 15.7 secs
