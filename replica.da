@@ -62,11 +62,11 @@ class Node(process):
       'forwarded_request': {},
       'shuttle': {},
       'result_shuttle': {},
-      'wedge_request': -1,
-      'checkpoint': -1,
-      'completed_checkpoint': -1,
-      'get_running_state': -1,
-      'catch_up': -1
+      'wedge_request': 0,
+      'checkpoint': 0,
+      'completed_checkpoint': 0,
+      'get_running_state': 0,
+      'catch_up': 0
     }
     replicaMsg("i am alive.! :D")
     replicaMsg("objDict at start=", objDict)
@@ -357,18 +357,22 @@ class Node(process):
     # 1. look for slot holes
     if(shuttle_type == 'forward'):
       if( shuttle_object['slot'] != slot+1 ):
-        print("Found hole in slot.")
+        replicaMsg("Found hole in slot.")
+        return False
+      # validate if we missed a checkpoint
+      if int( (shuttle_object['slot']-1)/self.checkpt_interval ) != self.checkpt_no:
+        replicaMsg("Missed a checkpoint.")
         return False
     else:
       if( shuttle_object['slot'] != reverse_slot+1 ):
-        print("Found hole in slot.")
+        replicaMsg("Found hole in slot.")
         return False
 
     # 2. validate size of both proofs same or not
     order_statements = shuttle_object['order_proof']['order_statements']
     result_hashes = shuttle_object['result_proof']['result_hashes']
     if( len(order_statements) != len(result_hashes) ):
-      print("Size of order_proof and result_proof arrays do not match.")
+      replicaMsg("Size of order_proof and result_proof arrays do not match.")
       return False
 
     # 3. validate signature and then contents
@@ -382,7 +386,7 @@ class Node(process):
         decrypted_order_stat = public_key.verify( order_statements[counter] )
         decrypted_res_hsh = public_key.verify( result_hashes[counter] )
       except nacl.exceptions.BadSignatureError:
-        print("Signature of replica '"+str(counter)+"'' did not match.")
+        replicaMsg("Signature of replica '"+str(counter)+"' did not match.")
         return False
 
       # validate the order statement
@@ -392,10 +396,10 @@ class Node(process):
         common_operation = unpickled_order_stat['operation']
       else:
         if(unpickled_order_stat['slot'] != common_slot):
-          print("Slot in order statement of replica '"+str(counter)+"'' did not match.")
+          replicaMsg("Slot in order statement of replica '"+str(counter)+"' did not match.")
           return False
         if(unpickled_order_stat['operation'] != common_operation):
-          print("Operation in order statement of replica '"+str(counter)+"'' did not match.")
+          replicaMsg("Operation in order statement of replica '"+str(counter)+"' did not match.")
           return False
 
       # validate the result statement
@@ -404,7 +408,7 @@ class Node(process):
         common_result_hash = unpickled_result_hash
       else:
         if(unpickled_result_hash != common_result_hash):
-          print("Result hash in result statement of replica '"+str(counter)+"'' did not match.")
+          replicaMsg("Result hash in result statement of replica '"+str(counter)+"' did not match.")
           return False
 
     # if control reaches here, means valid shuttle
@@ -541,7 +545,7 @@ class Node(process):
     replicaMsg("Deleted '"+workload_id+"' from timeout.")
     del timeout[ workload_id ]
 
-  def parseFailures( failures ):
+  def parseFailures( failures_arr ):
     failure_map = {
       'client_request': {},
       'forwarded_request': {},
@@ -554,37 +558,38 @@ class Node(process):
       'catch_up': {},
     }
 
-    if(not failures):
+    if(not failures_arr):
       return failure_map
 
-    split_arr = failures.split(';')
-    for failure in split_arr:
-      if failure.count(',') > 1:
-        matchObj = re.match( r'\s*(client_request|forwarded_request|shuttle|result_shuttle)\(([^,]*),([^\)]*)\),([^\()]*)\((.*)\)\s*', failure)
-        log_type = matchObj.group(1)
-        client_ID = int( matchObj.group(2) )
-        message_count = int( matchObj.group(3) )
-        trigger_type = matchObj.group(4)
-        if( matchObj.group(5) ):
-          trigger_type += ':' + matchObj.group(5)
-        if( client_ID in failure_map[log_type].keys() ):
-          if( message_count in failure_map[log_type][client_ID].keys() ):
-            failure_map[log_type][client_ID][message_count].append( trigger_type )
+    for failures in failures_arr:
+      split_arr = failures.split(';')
+      for failure in split_arr:
+        if failure.count(',') > 1:
+          matchObj = re.match( r'\s*(client_request|forwarded_request|shuttle|result_shuttle)\(([^,]*),([^\)]*)\),([^\()]*)\((.*)\)\s*', failure)
+          log_type = matchObj.group(1)
+          client_ID = int( matchObj.group(2) )
+          message_count = int( matchObj.group(3) )
+          trigger_type = matchObj.group(4)
+          if( matchObj.group(5) ):
+            trigger_type += ':' + matchObj.group(5)
+          if( client_ID in failure_map[log_type].keys() ):
+            if( message_count in failure_map[log_type][client_ID].keys() ):
+              failure_map[log_type][client_ID][message_count].append( trigger_type )
+            else:
+              failure_map[log_type][client_ID][message_count] = [ trigger_type ]
           else:
-            failure_map[log_type][client_ID][message_count] = [ trigger_type ]
+            failure_map[log_type][client_ID] = {message_count: [trigger_type] }
         else:
-          failure_map[log_type][client_ID] = {message_count: [trigger_type] }
-      else:
-        matchObj = re.match( r'\s*(wedge_request|checkpoint|completed_checkpoint|get_running_state|catch_up)\(([^\)]*)\),([^\()]*)\((.*)\)\s*', failure)
-        log_type = matchObj.group(1)
-        message_count = int( matchObj.group(2) )
-        trigger_type = matchObj.group(3)
-        if( matchObj.group(4) ):
-          trigger_type += ':' + matchObj.group(4)
-        if( message_count in failure_map[log_type].keys() ):
-          failure_map[log_type][message_count].append( trigger_type )
-        else:
-          failure_map[log_type] = {message_count: [trigger_type] }
+          matchObj = re.match( r'\s*(wedge_request|checkpoint|completed_checkpoint|get_running_state|catch_up)\(([^\)]*)\),([^\()]*)\((.*)\)\s*', failure)
+          log_type = matchObj.group(1)
+          message_count = int( matchObj.group(2) )
+          trigger_type = matchObj.group(3)
+          if( matchObj.group(4) ):
+            trigger_type += ':' + matchObj.group(4)
+          if( message_count in failure_map[log_type].keys() ):
+            failure_map[log_type][message_count].append( trigger_type )
+          else:
+            failure_map[log_type] = {message_count: [trigger_type] }
 
     return failure_map
 
@@ -610,11 +615,12 @@ class Node(process):
         replicaMsg("[Fault Injection] Condition matched for '"+log_type+"', client="+str(client_ID)+", message="+str(message_count)+".!")
       else:
         trigger_types = failure_map[log_type][message_count]
-        replicaMsg("[Fault Injection] Condition matched for '"+log_type+", message="+str(message_count)+".!")
+        replicaMsg("[Fault Injection] Condition matched for '"+log_type+"', message="+str(message_count)+".!")
     except KeyError:
       return
     for trigger_type in trigger_types:
       trigger_type.strip()
+      replicaMsg("Trigger is="+trigger_type)
       if(trigger_type == 'change_operation'):
         changeOpFlag = True
       if(trigger_type == 'change_result'):
@@ -622,6 +628,7 @@ class Node(process):
       if(trigger_type == 'drop_result_stmt'):
         dropResStmtFlag = True
       if(trigger_type == 'crash'):
+        state = 'CRASH'
         crashFlag = True
       if(trigger_type == 'drop'):
         ignoreThisMsg = True
@@ -641,9 +648,10 @@ class Node(process):
       if('truncate_history' in trigger_type): # check substring
         action, value = trigger_type.split(':')
         truncateHistFlag = True
-        truncateHistVal = value
+        truncateHistVal = int(value)
       if('sleep' in trigger_type):            # check substring
         action, value = trigger_type.split(':')
+        replicaMsg("[Error Injection] Sleeping for "+str(value)+" secs.!")
         time.sleep( int(value) )
 
   def replicaMsg(heading, dict={}, msg_type='action'):
@@ -689,7 +697,7 @@ class Node(process):
       'lastest_checkpt': lastest_checkpt,
       'latest_checkpt_proof': latest_checkpt_proof
     }
-    if truncateHistFlag and truncateHistVal>0:
+    if truncateHistFlag and (int(truncateHistVal)>0):
       replicaMsg("[Error Injection] History truncated for wedge response.!")
       obj['history'] = obj['history'][:-truncateHistVal]
       truncateHistFlag =  False

@@ -35,10 +35,13 @@ def parseConfigFile( configFilePath ):
           replica = int( matchKey.group(2) )
           if('failures' in config.keys()):
             if(sequence in config['failures'].keys()):
-              config['failures'][sequence][replica] = val
+              if( replica in config['failures'][sequence].keys() ):
+                config['failures'][sequence][replica].append(val)
+              else:
+                config['failures'][sequence][replica] = [val]
             else:
               config['failures'][sequence] = {
-                replica: val
+                replica: [val]
               }
           else:
             config['failures'] = {

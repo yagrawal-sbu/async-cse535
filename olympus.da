@@ -155,7 +155,7 @@ class Node(process):
   def sendCatchUp():
     # find longest history in quorum
     max_len_history = quorum[0]['history']
-    max_hist_replica = 0
+    max_hist_replica = quorum[0]['myPosition']
     for wedgeResponse in quorum:
       if len(wedgeResponse['history']) > len(max_len_history):
         max_len_history = wedgeResponse['history']
@@ -189,7 +189,7 @@ class Node(process):
     return True
 
   def sendClientResponses():
-    for client in last_client_result:
+    for client in last_client_result.keys():
       client_response_obj = {'client_workload': last_client_result[client], 'sender': self }
       send(('Olympus_Operation_Response', client_response_obj), to=client)
       output("Sent Olympus_Operation_Response to client.", client_response_obj)
@@ -325,7 +325,7 @@ class Node(process):
     output("Received CatchUp_Response from replica="+str(catchup_resp_obj['myPosition'])+".", catchup_resp_obj)
     if reconfigInProgress:
       catchUpResponses.append(catchup_resp_obj)
-      if catchup_resp_obj['myPosition']==max_hist_replica:
+    if int(catchup_resp_obj['myPosition'])==max_hist_replica:
         last_client_result = catchup_resp_obj['last_client_result']
     # output("\n\n")
 
