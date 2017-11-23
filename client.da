@@ -166,7 +166,7 @@ class Node(process):
     return ''
 
   def create_workload_object(operation):
-    print(operation)
+    clientMsg(operation)
     workload_to_be_encrpyted = {
       'id': uuid.uuid4().hex,
       'operation': operation,
@@ -189,7 +189,7 @@ class Node(process):
   def validateResponse( client_response_object ):
     result_hashes = client_response_object['result_proof']
     if( len(result_hashes) != len(replica_sequence) ):
-      print("Result hashes count does not match replicas count.")
+      clientMsg("Result hashes count does not match replicas count.")
       return False
 
     common_result_hash = cryptoEncode( client_response_object['result'] )
@@ -201,7 +201,7 @@ class Node(process):
       try:
         decrypted_res_hsh = public_key.verify( result_hashes[counter] )
       except nacl.exceptions.BadSignatureError:
-        print("Signature of replica '"+str(counter)+"'' did not match.")
+        clientMsg("Signature of replica '"+str(counter)+"'' did not match.")
         return False
 
       # validate the result statement
@@ -210,7 +210,7 @@ class Node(process):
         common_result_hash = unpickled_result_hash
       else:
         if(unpickled_result_hash != common_result_hash):
-          print("Result hash in result statement of replica '"+str(counter)+"'' did not match.")
+          clientMsg("Result hash in result statement of replica '"+str(counter)+"'' did not match.")
           return False
       verified_count += 1
       if(verified_count > fault_tolerance_factor):
