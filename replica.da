@@ -84,8 +84,8 @@ class Node(process):
 
       # messages from olympus get higher priority
       --olympus_to_replica
-      --client_to_replica
-      --replica_to_replica
+      # --client_to_replica
+      # --replica_to_replica
 
       # check the timeout array for any timeout
       if( workableState() ):
@@ -592,7 +592,7 @@ class Node(process):
           if( message_count in failure_map[log_type].keys() ):
             failure_map[log_type][message_count].append( trigger_type )
           else:
-            failure_map[log_type] = {message_count: [trigger_type] }
+            failure_map[log_type][message_count] = [trigger_type]
 
     return failure_map
 
@@ -631,8 +631,11 @@ class Node(process):
       if(trigger_type == 'drop_result_stmt'):
         dropResStmtFlag = True
       if(trigger_type == 'crash'):
-        state = 'CRASH'
+        self.state = 'CRASH'
+        logging.shutdown()
+        os._exit(-1)
         crashFlag = True
+        replicaMsg("[Error Injection] Crash Flag is true. Dying now.!")
       if(trigger_type == 'drop'):
         ignoreThisMsg = True
       if(trigger_type == 'increment_slot'):
@@ -654,8 +657,8 @@ class Node(process):
         truncateHistVal = int(value)
       if('sleep' in trigger_type):            # check substring
         action, value = trigger_type.split(':')
-        replicaMsg("[Error Injection] Sleeping for "+str(value)+" secs.!")
-        time.sleep( int(value) )
+        replicaMsg("[Error Injection] Sleeping for "+str(value)+" milli-secs.!")
+        time.sleep( int(value)/1000 )
 
   def replicaMsg(heading, dict={}, msg_type='action'):
     if(msg_type=='imp'):

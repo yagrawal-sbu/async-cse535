@@ -122,9 +122,10 @@ class Node(process):
     for wedgeResponse in quorum:
       index = 0
       for entry in wedgeResponse['history']:
-        if( len(entry)!=3 and entry[0]!=highest_checkpt_no):
+        if( len(entry)!=3 or ( len(entry)==3 and entry[0]!=highest_checkpt_no) ):
           index += 1
         else:
+          index += 1
           break
       wedgeResponse['history'] = wedgeResponse['history'][index:]
 
@@ -174,14 +175,16 @@ class Node(process):
     common_state = catchUpResponses[0]['state_encrypted']
     for catchUpResp in catchUpResponses:
       if not catchUpResp['state_encrypted'] == common_state:
+        output("catchUpResponses validation failed.!")
         return False
     output("catchUpResponses validated.!")
     return True
 
   def getNewState():
     newStateReceived = False
-    send(('Get_State'), to=self.replica_sequence[ wedgeResponses[0]['myPosition'] ])
-    output("Sent Get_State request to one replica in the quorum.")
+    for wedgeResponse in quorum:
+      send(('Get_State'), to=self.replica_sequence[ wedgeResponse['myPosition'] ])
+    output("Sent Get_State request to all replicas in the quorum.")
 
   def validCheckPtStat(checkpt_stat):
     # check signatures and count

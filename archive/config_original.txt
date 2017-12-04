@@ -1,0 +1,29 @@
+# test case name
+test_case_name = client_request_condition_change_operation_failure_t1_c1
+# number of failures to tolerate.  number of replicas is 2t+1.
+t = 3
+# timeout, in milliseconds, for head and non-head servers
+head_timeout = 2000
+nonhead_timeout = 2000
+# sleep at tail before sending result
+# sleep_before_send = 4
+skip_tail_reply = 1
+checkpt_interval = 3
+
+# number of clients
+num_client = 1
+# client timeout, in milliseconds
+client_timeout = 2000
+# CLIENT WORKLOAD
+workload[0] = put('movie','star'); append('movie',' wars'); get('movie'); put('jedi','luke skywalker'); slice('jedi','0:4'); get('jedi')
+workload[1] = put('jedi','luke skywalker'); slice('jedi','0:4'); get('jedi')
+workload[2] = put('hello','world'); put('hello','world1'); slice('hello', '0:4'); get('hello')
+
+# FAILURE SCENARIO
+# failures(c,r) is the failure scenario for replica r in configuration c.
+# configurations are numbered starting with 0.  replicas are numbered by
+# position in the chain, starting from 0.  replicas without a specified
+# failure scenario are failure-free.
+# failures[0,0] = client_request(0,1),change_operation()
+# failures[1,1] = result_shuttle(0,1),drop()
+# failures[2,1] = client_request(2,1),change_operation()
